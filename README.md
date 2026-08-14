@@ -4,8 +4,9 @@ A Kodi addon for watching aircraft out of the window. It shows **where the
 aircraft you are looking at came from and where it is going**, as a split-flap
 departure board.
 
-Built for a high floor in Bangkok with a view of Suvarnabhumi, but the location,
-window bearing and reference airports are all settings, so it works anywhere.
+It ships configured for Suvarnabhumi, so anyone with a view of the airport can
+install it and set two numbers. The location, window bearing and reference
+airport are all settings, so it works at any airport you can see from a window.
 
 <img src="script.flighttracker/resources/media/icon.png" width="96" alt="">
 
@@ -129,12 +130,12 @@ the horizon — is measured from here.
 
 ### Height above sea level
 
-Your floor height plus local ground level, in metres. This is what makes the
-"degrees above the horizon" figure meaningful.
+Your height above the ground plus the local ground elevation, in metres. This is
+what makes the "degrees above the horizon" figure meaningful.
 
-A rough guide: about 3 m per residential floor. **Floor 33 in Bangkok is
-roughly 100 m of building plus a couple of metres of ground, so ~110 m** — which
-is the default.
+Reckon on roughly 3 m per residential floor and add the ground elevation, which
+is only a couple of metres across most of Bangkok. The default of 110 m suits an
+upper floor of a high-rise; set it near zero for a house or a low-rise.
 
 ### Compass bearing the window faces
 

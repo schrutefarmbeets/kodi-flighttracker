@@ -24,7 +24,7 @@
 <addon id="script.flighttracker"
        name="Flight Tracker"
        version="1.0.0"
-       provider-name="William">
+       provider-name="schrutefarmbeets">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
   </requires>
@@ -33,12 +33,12 @@
   </extension>
   <extension point="xbmc.service" library="service.py"/>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en_gb">Live aircraft outside your window, with origin and destination</summary>
-    <description lang="en_gb">Shows the aircraft around you in real time on a radar plus a sortable list: airline, route (where it came from and where it is going), aircraft type, altitude, speed and climb rate.
+    <summary lang="en_gb">A departure board for the aircraft outside your window</summary>
+    <description lang="en_gb">Turns a view of an airport into a split-flap departure board. Rather than listing everything in the sky, it shows what is happening right now: the airliner on final approach, and the one climbing out. Each row carries the airline's logo, where the flight came from and where it is going, the flight number and the aircraft type.
 
-Built for watching a nearby airport from a window. Set the compass bearing your window faces and the radar rotates to match, so the plane at the top of the screen is the plane on the left of your view. Each flight shows its bearing and its angle above the horizon, so you can tell which aircraft in the sky is which row in the list.
+Three views, switchable: the board on its own, the board beside a radar, or the board beside a map with the coastline and the real runway layouts. In both split views the surrounding traffic is drawn dim and the aircraft on the board are picked out bright, so the row that says LANDING and the aeroplane on the screen are obviously the same one. Set the compass bearing your window faces and the panel rotates to match, so straight up on screen is straight ahead through the glass.
 
-Uses free, key-free public data: adsb.lol or adsb.fi for positions, adsbdb.com for airline and route lookups, or your own local dump1090/tar1090 receiver if you have one. No account and no API key required.</description>
+Arrivals, departures and overflights are independent switches. Uses free, key-free public data: adsb.lol or adsb.fi for positions, adsbdb.com for airline and route lookups, or your own local dump1090/tar1090 receiver if you have one. No account and no API key required.</description>
     <platform>all</platform>
     <license>MIT</license>
     <language>en</language>
