@@ -1,0 +1,16 @@
+v1.0.0
+- Split-flap departure board showing what is happening right now: the aircraft
+  on final approach and the one climbing out, rather than a list to scan.
+- Airline logos, fetched once per airline and cached, with a text badge when no
+  trustworthy logo is available.
+- Three views: board only, board with radar, board with map.
+- Bundled vector map of the upper Gulf coastline, the Chao Phraya, and the
+  runway layouts at Suvarnabhumi and Don Mueang. No network needed.
+- Radar and map rotate to match your window, with the visible slice of sky
+  marked; the aircraft on the board are picked out bright and labelled.
+- Arrivals, departures and overflights are independent switches.
+- Non-airline traffic is kept off the board using the ADS-B emitter category.
+- Feeds: adsb.lol, adsb.fi, or a local dump1090/tar1090 receiver.
+- Route and airframe lookups via adsbdb.com, capped per refresh and cached on
+  disk so an evening at the window is almost entirely cache hits.
+- Optional background service that notifies when a low aircraft passes close.

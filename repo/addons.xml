@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addons>
+<addon id="repository.flighttracker"
+       name="Flight Tracker Repository"
+       version="1.0.0"
+       provider-name="schrutefarmbeets">
+  <extension point="xbmc.addon.repository" name="Flight Tracker Repository">
+    <dir>
+      <info compressed="false">https://raw.githubusercontent.com/schrutefarmbeets/kodi-flighttracker/main/repo/addons.xml</info>
+      <checksum>https://raw.githubusercontent.com/schrutefarmbeets/kodi-flighttracker/main/repo/addons.xml.md5</checksum>
+      <datadir zip="true">https://raw.githubusercontent.com/schrutefarmbeets/kodi-flighttracker/main/repo/</datadir>
+    </dir>
+  </extension>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en_gb">Updates for Flight Tracker</summary>
+    <description lang="en_gb">Install this once and Kodi will offer Flight Tracker updates as they are published.</description>
+    <platform>all</platform>
+    <license>MIT</license>
+    <assets>
+      <icon>icon.png</icon>
+    </assets>
+  </extension>
+</addon>
+<addon id="script.flighttracker"
+       name="Flight Tracker"
+       version="1.0.0"
+       provider-name="William">
+  <requires>
+    <import addon="xbmc.python" version="3.0.0"/>
+  </requires>
+  <extension point="xbmc.python.script" library="default.py">
+    <provides>executable</provides>
+  </extension>
+  <extension point="xbmc.service" library="service.py"/>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en_gb">Live aircraft outside your window, with origin and destination</summary>
+    <description lang="en_gb">Shows the aircraft around you in real time on a radar plus a sortable list: airline, route (where it came from and where it is going), aircraft type, altitude, speed and climb rate.
+
+Built for watching a nearby airport from a window. Set the compass bearing your window faces and the radar rotates to match, so the plane at the top of the screen is the plane on the left of your view. Each flight shows its bearing and its angle above the horizon, so you can tell which aircraft in the sky is which row in the list.
+
+Uses free, key-free public data: adsb.lol or adsb.fi for positions, adsbdb.com for airline and route lookups, or your own local dump1090/tar1090 receiver if you have one. No account and no API key required.</description>
+    <platform>all</platform>
+    <license>MIT</license>
+    <language>en</language>
+    <assets>
+      <icon>resources/media/icon.png</icon>
+      <fanart>resources/media/fanart.jpg</fanart>
+    </assets>
+    <news>v1.0.0 - First release.</news>
+  </extension>
+</addon>
+</addons>

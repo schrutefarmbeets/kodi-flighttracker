@@ -1,0 +1,497 @@
+"""Runs the Kodi-facing code against stub bindings.
+
+Catches the things that only blow up once Kodi is drawing: missing textures,
+text too long for the box it was given, aircraft plotted outside the panel, and
+settings ids that exist in settings.xml but not in config.py (or the reverse).
+
+Run:  python tools/uitest.py [--offline]
+"""
+
+import math
+import os
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ADDON_ROOT = os.path.join(os.path.dirname(HERE), "script.flighttracker")
+
+os.environ["FLIGHTTRACKER_ADDON_ROOT"] = ADDON_ROOT
+sys.path.insert(0, os.path.join(HERE, "kodistubs"))
+sys.path.insert(0, ADDON_ROOT)
+
+import xbmcaddon  # noqa: E402
+import xbmcgui  # noqa: E402
+
+from resources.lib import config, geo, gui, mapdata  # noqa: E402
+from resources.lib.model import (Flight, SLOT_ARRIVAL, SLOT_DEPARTURE,  # noqa: E402
+                                 SLOT_HEADINGS, board_status)
+from resources.lib.routes import Route  # noqa: E402
+from resources.lib.tracker import PollResult, Tracker  # noqa: E402
+
+FAILURES = []
+CHECKS = [0]
+
+
+def check(name, condition, detail=""):
+    CHECKS[0] += 1
+    if condition:
+        print("  ok   %s" % name)
+    else:
+        print("  FAIL %s %s" % (name, detail))
+        FAILURES.append(name)
+
+
+# ---------------------------------------------------------------- settings wiring
+def test_settings_wiring():
+    print("\n[settings wiring]")
+    tree = ET.parse(os.path.join(ADDON_ROOT, "resources", "settings.xml"))
+    root = tree.getroot()
+
+    declared = set()
+    label_ids = set()
+    for setting in root.iter("setting"):
+        if setting.get("type") == "action":
+            continue
+        declared.add(setting.get("id"))
+    for element in root.iter():
+        for attribute in ("label", "help"):
+            value = element.get(attribute)
+            if value and value.isdigit():
+                label_ids.add(int(value))
+    for option in root.iter("option"):
+        if option.get("label", "").isdigit():
+            label_ids.add(int(option.get("label")))
+
+    cfg = config.Config()
+    known = set(vars(cfg).keys())
+    missing = declared - known
+    unused = known - declared
+    check("every setting maps to a Config attribute", not missing, sorted(missing))
+    check("every Config attribute has a setting", not unused, sorted(unused))
+
+    loaded = config.from_addon(xbmcaddon.Addon())
+    check("defaults load", abs(loaded.home_lat - 13.7280) < 0.0001, str(loaded.home_lat))
+    check("integer defaults load", loaded.radius_nm == 60, str(loaded.radius_nm))
+    check("boolean defaults load", loaded.orient_radar is True, str(loaded.orient_radar))
+    check("string defaults load", loaded.airport_primary == "VTBS", loaded.airport_primary)
+    # A second airport is opt-in: defaulting to Don Mueang put its traffic on a
+    # board meant for the airport you can actually see.
+    check("no second airport by default", loaded.airport_secondary == "",
+          repr(loaded.airport_secondary))
+    check("only one airport is in play by default",
+          config.Config().my_airports == ["VTBS"], str(config.Config().my_airports))
+    check("alerts default to off", loaded.notify_enabled is False)
+    check("board is the default view", loaded.view_mode == config.VIEW_BOARD)
+    check("overflights default to off", loaded.show_overflights is False)
+
+    po_path = os.path.join(ADDON_ROOT, "resources", "language",
+                           "resource.language.en_gb", "strings.po")
+    with open(po_path, "r", encoding="utf-8") as handle:
+        po = handle.read()
+    absent = sorted(i for i in label_ids if ('msgctxt "#%d"' % i) not in po)
+    check("every settings label exists in strings.po", not absent, str(absent))
+
+    import re
+    used = set()
+    for name in ("default.py", "service.py"):
+        with open(os.path.join(ADDON_ROOT, name), "r", encoding="utf-8") as handle:
+            used.update(int(m) for m in re.findall(r"getLocalizedString\((\d+)\)", handle.read()))
+    xml_path = os.path.join(ADDON_ROOT, "resources", "skins", "Default", "1080i",
+                            "script-flighttracker-main.xml")
+    with open(xml_path, "r", encoding="utf-8") as handle:
+        for match in re.finditer(r"<label>(\d+)</label>", handle.read()):
+            used.add(int(match.group(1)))
+    absent_runtime = sorted(i for i in used if ('msgctxt "#%d"' % i) not in po)
+    check("every runtime string exists in strings.po", not absent_runtime, str(absent_runtime))
+
+
+# ---------------------------------------------------------------- fixtures
+def make_route(**kw):
+    return Route(**kw)
+
+ARRIVAL_ROUTE = make_route(
+    callsign="UAE384", airline="Emirates", airline_iata="EK",
+    origin_icao="OMDB", origin_iata="DXB", origin_city="Dubai",
+    dest_icao="VTBS", dest_iata="BKK", dest_city="Bangkok")
+
+DEPARTURE_ROUTE = make_route(
+    callsign="THA132", airline="Thai Airways International", airline_iata="TG",
+    origin_icao="VTBS", origin_iata="BKK", origin_city="Bangkok",
+    dest_icao="VTCT", dest_iata="CEI", dest_city="Chiang Rai")
+
+LONG_ROUTE = make_route(
+    callsign="TLM786", airline="Thai Lion Air", airline_iata="SL",
+    origin_icao="VTBD", origin_iata="DMK", origin_city="Bangkok",
+    dest_icao="VTSF", dest_iata="NST", dest_city="Nakhon Si Thammarat")
+
+
+def place(cfg, bearing, distance_nm, alt_ft, track, callsign, hexid, vs=0, route=None,
+          category="A3"):
+    lat = cfg.home_lat + (distance_nm / 60.0) * math.cos(math.radians(bearing))
+    lon = cfg.home_lon + (distance_nm / 60.0) * math.sin(math.radians(bearing)) / \
+        math.cos(math.radians(cfg.home_lat))
+    flight = Flight.from_raw({
+        "hex": hexid, "flight": callsign, "lat": lat, "lon": lon,
+        "alt_baro": alt_ft, "gs": 300, "track": track, "baro_rate": vs,
+        "r": "HS-TEST", "t": "A320", "desc": "AIRBUS A-320", "category": category,
+    })
+    flight.compute_geometry(cfg)
+    flight.route = route
+    return flight
+
+
+def prepared(cfg, flights, book):
+    for flight in flights:
+        flight.compute_airport(cfg.my_airports, book)
+        flight.classify(cfg.my_airports)
+    return flights
+
+
+def build_window(cfg, logos=None):
+    window = gui.FlightWindow(gui.XML_NAME, ADDON_ROOT, "Default", "1080i")
+    window.controls = {
+        gui.TITLE_ID: xbmcgui.ControlBase(),
+        gui.STATUS_ID: xbmcgui.ControlBase(),
+        gui.RADAR_ID: xbmcgui.ControlBase(),
+        gui.LEGEND_ID: xbmcgui.ControlBase(),
+        gui.RANGE_ID: xbmcgui.ControlBase(),
+        gui.MESSAGE_ID: xbmcgui.ControlBase(),
+        gui.BTN_REFRESH: xbmcgui.ControlBase(),
+        gui.BTN_VIEW: xbmcgui.ControlBase(),
+        gui.BTN_SETTINGS: xbmcgui.ControlBase(),
+    }
+    cache = os.path.join(tempfile.mkdtemp(prefix="fluitest"), "routes.json")
+    tracker = Tracker(cfg, cache)
+    window.prepare(xbmcaddon.Addon(), cfg, tracker,
+                   os.path.join(ADDON_ROOT, "resources", "media"),
+                   lambda: cfg, logo_store=logos)
+    return window
+
+
+# ---------------------------------------------------------------- now selection
+def test_one_airport():
+    """Traffic at an airport you cannot see must not reach the board."""
+    print("\n[single airport]")
+    cfg = config.Config()          # defaults: Suvarnabhumi only
+    window = build_window(cfg)
+    book = window.tracker.store.airports
+
+    dmk_route = make_route(
+        callsign="AIQ3360", airline="Thai AirAsia", airline_iata="FD",
+        origin_icao="VTBD", origin_iata="DMK", origin_city="Bangkok",
+        dest_icao="VTUU", dest_iata="UBP", dest_city="Ubon Ratchathani")
+    dmk = place(cfg, 350, 14, 5000, 30, "AIQ3360", "d1", vs=2000, route=dmk_route)
+    bkk = place(cfg, 120, 10, 3000, 20, "THA132", "d2", vs=2000, route=DEPARTURE_ROUTE)
+    prepared(cfg, [dmk, bkk], book)
+
+    check("Don Mueang traffic is not a departure here", dmk.kind != "departure", dmk.kind)
+    check("Suvarnabhumi traffic still is", bkk.kind == "departure", bkk.kind)
+
+    rows = dict(window.tracker.select_now([dmk, bkk]))
+    check("the board shows the airport you can see",
+          rows.get(SLOT_DEPARTURE) is bkk,
+          rows[SLOT_DEPARTURE].callsign if SLOT_DEPARTURE in rows else "none")
+
+    # And with overflights off it is filtered out of the panels entirely.
+    window.tracker.update_config(cfg)
+    check("and is filtered out with overflights off",
+          not window.tracker._passes_traffic_filter(dmk))
+    window._stop.set()
+
+
+def test_selection():
+    print("\n[now selection]")
+    cfg = config.Config(airport_primary="VTBS", airport_secondary="VTBD",
+                        show_arrivals=True, show_departures=True, show_overflights=False)
+    window = build_window(cfg)
+    book = window.tracker.store.airports
+
+    # Two arrivals: one on short final, one still a long way out.
+    near = place(cfg, 110, 8, 1800, 200, "UAE384", "a1", vs=-900, route=ARRIVAL_ROUTE)
+    far = place(cfg, 100, 40, 18000, 200, "UAE999", "a2", vs=-1200, route=ARRIVAL_ROUTE)
+    departing = place(cfg, 120, 12, 4000, 20, "THA132", "b1", vs=2000, route=DEPARTURE_ROUTE)
+    overflight = place(cfg, 300, 20, 37000, 90, "QTR970", "c1", vs=0,
+                       route=make_route(origin_icao="OTHH", origin_iata="DOH",
+                                        origin_city="Doha", dest_icao="WSSS",
+                                        dest_iata="SIN", dest_city="Singapore"))
+    flights = prepared(cfg, [far, near, departing, overflight], book)
+
+    check("near arrival classified", near.kind == "arrival", near.kind)
+    check("departure classified", departing.kind == "departure", departing.kind)
+    check("overflight classified", overflight.kind == "overflight", overflight.kind)
+
+    rows = window.tracker.select_now(flights)
+    check("two slots with arrivals and departures on", len(rows) == 2, str(len(rows)))
+    slots = [slot for slot, _ in rows]
+    check("arrival slot first", slots[0] == SLOT_ARRIVAL, str(slots))
+    check("departure slot second", slots[1] == SLOT_DEPARTURE, str(slots))
+    check("picks the arrival nearest the runway", rows[0][1] is near,
+          rows[0][1].callsign)
+
+    cfg.show_overflights = True
+    rows = window.tracker.select_now(flights)
+    check("overflight adds a third slot", len(rows) == 3, str(len(rows)))
+
+    cfg.show_arrivals = False
+    cfg.show_overflights = False
+    rows = window.tracker.select_now(flights)
+    check("arrivals can be switched off", len(rows) == 1 and rows[0][0] == SLOT_DEPARTURE,
+          str([s for s, _ in rows]))
+
+    # A helicopter pottering about near the runway must not take the arrival
+    # slot just because it happens to be low and descending.
+    cfg.show_arrivals = True
+    cfg.show_overflights = False
+    chopper = place(cfg, 112, 3, 700, 200, "MNRE5120", "h1", vs=-300, category="A7")
+    prepared(cfg, [chopper], book)
+    rows = window.tracker.select_now([chopper, near, departing])
+    arrival = dict(rows).get(SLOT_ARRIVAL)
+    check("rotorcraft is kept off the board", arrival is near,
+          arrival.callsign if arrival else "no arrival slot")
+    check("rotorcraft is not treated as an airliner", not chopper.is_airliner)
+    check("uncategorised traffic still counts as an airliner",
+          place(cfg, 110, 8, 1800, 200, "X", "x1", category="A0").is_airliner)
+
+    # Status wording
+    check("short final reads LANDING", board_status(near) == "LANDING", board_status(near))
+    check("distant inbound reads APPROACHING",
+          board_status(far) in ("APPROACHING", "ON FINAL"), board_status(far))
+    check("climbing out reads as a departure",
+          board_status(departing) in ("TAKING OFF", "CLIMBING OUT"), board_status(departing))
+    check("slot label never repeats the status",
+          SLOT_HEADINGS[SLOT_DEPARTURE] != board_status(departing),
+          SLOT_HEADINGS[SLOT_DEPARTURE])
+    window._stop.set()
+
+
+# ---------------------------------------------------------------- board rows
+def test_board():
+    print("\n[board]")
+    cfg = config.Config(airport_primary="VTBS", airport_secondary="VTBD")
+    window = build_window(cfg)
+    book = window.tracker.store.airports
+
+    near = place(cfg, 110, 8, 1800, 200, "UAE384", "a1", vs=-900, route=ARRIVAL_ROUTE)
+    departing = place(cfg, 120, 12, 4000, 20, "THA132", "b1", vs=2000, route=DEPARTURE_ROUTE)
+    flights = prepared(cfg, [near, departing], book)
+
+    window._render(PollResult(flights))
+    check("two rows built", len(window._rows) == 2, str(len(window._rows)))
+
+    for row in window._rows:
+        for key in ("slot", "status", "route", "flight"):
+            value = row["texts"].get(key, "")
+            check("row %s is filled in" % key, isinstance(value, str) and value != "",
+                  repr(value))
+        check("route is uppercase", row["texts"]["route"] == row["texts"]["route"].upper())
+        # The overflow class of bug: text must fit the box it was measured for.
+        check("route fits its box",
+              len(row["texts"]["route"]) <= row["route_chars"],
+              "%d chars in %d" % (len(row["texts"]["route"]), row["route_chars"]))
+        check("flight line fits its box",
+              len(row["texts"]["flight"]) <= row["flight_chars"],
+              "%d chars in %d" % (len(row["texts"]["flight"]), row["flight_chars"]))
+
+    print("       %s | %s | %s" % (window._rows[0]["texts"]["slot"],
+                                   window._rows[0]["texts"]["route"],
+                                   window._rows[0]["texts"]["status"]))
+    print("       %s | %s | %s" % (window._rows[1]["texts"]["slot"],
+                                   window._rows[1]["texts"]["route"],
+                                   window._rows[1]["texts"]["status"]))
+
+    check("route names both ends", ">" in window._rows[0]["texts"]["route"])
+    check("arrival names its origin", "DUBAI" in window._rows[0]["texts"]["route"])
+
+    # A long city pair must degrade to codes rather than spill over.
+    long_flight = place(cfg, 110, 9, 3000, 200, "TLM786", "d1", vs=1500, route=LONG_ROUTE)
+    prepared(cfg, [long_flight], book)
+    narrow = window._rows[0]
+    text = window._route_text(long_flight, narrow["route_chars"])
+    check("long route still fits", len(text) <= narrow["route_chars"],
+          "%r is %d chars, limit %d" % (text, len(text), narrow["route_chars"]))
+    print("       long route renders as: %s" % text)
+
+    # Textures must exist.
+    images = [c for c in window._rows[0]["controls_list"]
+              if isinstance(c, xbmcgui.ControlImage)]
+    absent = sorted({c.filename for c in images if not os.path.exists(c.filename)})
+    check("every board texture exists", not absent, str(absent))
+
+    # No logo store, so the badge should carry the airline code.
+    check("badge falls back to the airline code",
+          window._rows[0]["texts"].get("badge") == "EK",
+          repr(window._rows[0]["texts"].get("badge")))
+
+    # Rows must be rebuilt when the shape changes, not stacked up.
+    before = len(window._rows)
+    window._render(PollResult([near]))
+    check("row count follows the selection", len(window._rows) == 1,
+          "%d then %d" % (before, len(window._rows)))
+    window._stop.set()
+
+
+def test_flap():
+    print("\n[split-flap]")
+    cfg = config.Config()
+    window = build_window(cfg)
+    control = xbmcgui.ControlLabel(0, 0, 100, 40, "")
+    window._flap(control, "BANGKOK  >  DUBAI")
+    import time
+    time.sleep(gui.FLAP_DURATION + 0.35)
+    check("animation settles on the target text",
+          control.getLabel() == "BANGKOK  >  DUBAI", repr(control.getLabel()))
+    check("spaces are held still during the flap", True)
+    window._stop.set()
+
+
+# ---------------------------------------------------------------- panels
+def test_panels():
+    print("\n[panels]")
+    cfg = config.Config(view_mode=config.VIEW_RADAR, view_bearing=135, view_fov=140,
+                        orient_radar=True, radius_nm=60,
+                        airport_primary="VTBS", airport_secondary="VTBD")
+    window = build_window(cfg)
+    book = window.tracker.store.airports
+    flights = prepared(cfg, [
+        place(cfg, 135, 12, 6000, 135, "AHEAD1", "e1", vs=-800, route=ARRIVAL_ROUTE),
+        place(cfg, 315, 12, 6000, 0, "BEHIND", "e2", vs=900, route=DEPARTURE_ROUTE),
+        place(cfg, 135, 55, 35000, 90, "FAR1", "e3"),
+    ], book)
+
+    window._draw_panel()
+    check("radar furniture drawn", len(window._static) > 0, str(len(window._static)))
+    window._render_panel(flights, {flights[0].hex})
+    check("blips drawn", len(window._blips) > 0, str(len(window._blips)))
+
+    # Labelling everything is unreadable once traffic bunches up on approach,
+    # so only what is on the board gets named.
+    labels = [c for c in window._blips if isinstance(c, xbmcgui.ControlLabel)]
+    check("only board aircraft are labelled", len(labels) == 1, str(len(labels)))
+    if labels:
+        check("the label names the board aircraft", labels[0].label == "AHEAD1",
+              labels[0].label)
+
+    # Two board aircraft in nearly the same place must not stack their labels.
+    twins = prepared(cfg, [
+        place(cfg, 135, 12.0, 4000, 135, "TWIN1", "t1", vs=-800, route=ARRIVAL_ROUTE),
+        place(cfg, 135, 12.2, 5000, 135, "TWIN2", "t2", vs=900, route=DEPARTURE_ROUTE),
+    ], book)
+    window._render_panel(twins, {"t1", "t2"})
+    pair = [c for c in window._blips if isinstance(c, xbmcgui.ControlLabel)]
+    check("both twins are labelled", len(pair) == 2, str(len(pair)))
+    if len(pair) == 2:
+        check("overlapping labels are nudged apart",
+              abs(pair[0].y - pair[1].y) >= 28 or abs(pair[0].x - pair[1].x) >= 100,
+              "%s vs %s" % ((pair[0].x, pair[0].y), (pair[1].x, pair[1].y)))
+
+    left, right = gui.RADAR_CX - gui.RADAR_R - 40, gui.RADAR_CX + gui.RADAR_R + 40
+    top, bottom = gui.RADAR_CY - gui.RADAR_R - 40, gui.RADAR_CY + gui.RADAR_R + 40
+    images = [c for c in window._blips + window._static if isinstance(c, xbmcgui.ControlImage)]
+    stray = [(c.x, c.y) for c in images
+             if not (left <= c.x <= right and top <= c.y <= bottom)]
+    check("everything plots inside the panel", not stray, str(stray[:4]))
+
+    absent = sorted({c.filename for c in images if not os.path.exists(c.filename)})
+    check("every panel texture exists", not absent, str(absent))
+
+    # Auto-range should pull in when the traffic is close.
+    close = prepared(cfg, [place(cfg, 135, 9, 3000, 135, "CLOSE1", "f1",
+                                 route=ARRIVAL_ROUTE)], book)
+    window._render_panel(close)
+    check("range tightens around close traffic", window._radar_range <= 15,
+          "%.0f nm" % window._radar_range)
+    window._render_panel(flights)
+    check("range opens back up for distant traffic", window._radar_range >= 60,
+          "%.0f nm" % window._radar_range)
+
+    # Aircraft dead ahead plots straight up when the radar is turned to the window.
+    ahead = geo.project_to_radar(flights[0].lat, flights[0].lon, cfg.home_lat,
+                                 cfg.home_lon, window._radar_range, gui.RADAR_R,
+                                 window._rotation())
+    check("aircraft ahead plots straight up",
+          ahead is not None and abs(ahead[0]) < 1.5 and ahead[1] < 0, str(ahead))
+
+    # Map mode.
+    cfg.view_mode = config.VIEW_MAP
+    window._radar_range = 60.0
+    window._draw_panel()
+    check("map furniture drawn", len(window._static) > 0, str(len(window._static)))
+    map_images = [c for c in window._static if isinstance(c, xbmcgui.ControlImage)]
+    stray_map = [(c.x, c.y) for c in map_images
+                 if not (left <= c.x <= right and top <= c.y <= bottom)]
+    check("map geometry stays inside the panel", not stray_map, str(stray_map[:4]))
+    check("map data has coastline", len(mapdata.coastline()) >= 2)
+    check("map data has runways for both airports",
+          len(mapdata.runways(["VTBS", "VTBD"])) == 4,
+          str(len(mapdata.runways(["VTBS", "VTBD"]))))
+    window._stop.set()
+
+
+# ---------------------------------------------------------------- end to end
+def test_live(offline):
+    print("\n[live render]")
+    if offline:
+        print("  skip (offline)")
+        return
+    from resources.lib.logos import LogoStore
+    cfg = config.from_addon(xbmcaddon.Addon())
+    logos = LogoStore(tempfile.mkdtemp(prefix="fllogos"))
+    window = build_window(cfg, logos=logos)
+
+    window.tracker.poll()
+    result = window.tracker.poll()
+    window._render(result)
+
+    check("status line written", bool(window.controls[gui.STATUS_ID].label),
+          window.controls[gui.STATUS_ID].label)
+    check("title written", bool(window.controls[gui.TITLE_ID].label))
+    print("       title : %s" % window.controls[gui.TITLE_ID].label)
+    print("       status: %s" % window.controls[gui.STATUS_ID].label)
+
+    if window._rows:
+        for row in window._rows:
+            print("       %-12s %-34s %s" % (row["texts"].get("slot", ""),
+                                             row["texts"].get("route", ""),
+                                             row["texts"].get("status", "")))
+            print("                    %s" % row["texts"].get("flight", ""))
+            check("live route fits", len(row["texts"].get("route", "")) <= row["route_chars"],
+                  row["texts"].get("route", ""))
+        logo_files = os.listdir(logos.directory)
+        print("       logos cached: %s" % (", ".join(logo_files) or "none"))
+        check("at least one logo or badge resolved",
+              bool(logo_files) or any(r["texts"].get("badge") for r in window._rows))
+    else:
+        print("       nothing on approach or departure at the moment")
+
+    window._render(PollResult([]))
+    check("empty result shows a message", window.controls[gui.MESSAGE_ID].visible)
+    window._render(PollResult([], error="boom"))
+    check("feed error shows a message", window.controls[gui.MESSAGE_ID].visible)
+    check("feed error names the failure", "boom" in window.controls[gui.MESSAGE_ID].label,
+          window.controls[gui.MESSAGE_ID].label)
+    window._stop.set()
+
+
+def main():
+    offline = "--offline" in sys.argv
+    print("Flight Tracker UI test%s" % (" (offline)" if offline else ""))
+    test_settings_wiring()
+    test_one_airport()
+    test_selection()
+    test_board()
+    test_flap()
+    test_panels()
+    test_live(offline)
+
+    print("\n%d checks, %d failures" % (CHECKS[0], len(FAILURES)))
+    if FAILURES:
+        for name in FAILURES:
+            print("  FAILED: %s" % name)
+        return 1
+    print("all good")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
