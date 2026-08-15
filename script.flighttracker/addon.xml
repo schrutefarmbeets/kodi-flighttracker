@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="script.flighttracker"
        name="Flight Tracker"
-       version="1.0.3"
+       version="1.0.4"
        provider-name="schrutefarmbeets">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
@@ -24,6 +24,6 @@ Arrivals, departures and overflights are independent switches. Uses free, key-fr
       <icon>resources/media/icon.png</icon>
       <fanart>resources/media/fanart.jpg</fanart>
     </assets>
-    <news>v1.0.3 - The queue is ranked by track miles rather than ground distance, so an aircraft near the airport but far too high to be landing no longer claims to be landing next. The board also shows the IATA flight number, MH784 rather than MAS784, so it matches the tracking apps.</news>
+    <news>v1.0.4 - Radar and map labels now use the same flight number the board prints, so a row and its aircraft can be matched up.</news>
   </extension>
 </addon>

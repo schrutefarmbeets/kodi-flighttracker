@@ -738,8 +738,10 @@ class FlightWindow(xbmcgui.WindowXML):
                 colorDiffuse=_hex(colour)))
 
             if featured and self.cfg.radar_labels and flight.callsign:
-                # Added last so a label is never hidden under another blip.
-                labels.append((x + size // 2 + 6, y - 14, flight.callsign, colour))
+                # The same number the board prints, or a row and its blip
+                # cannot be matched up. Added last so a label is never hidden
+                # under another blip.
+                labels.append((x + size // 2 + 6, y - 14, flight.display_number, colour))
         controls.extend(self._place_labels(labels, getattr(self, "_reserved", [])))
 
         if not controls:

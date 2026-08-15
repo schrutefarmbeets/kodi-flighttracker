@@ -514,6 +514,20 @@ def test_panels():
         check("the label names the board aircraft", labels[0].label == "AHEAD1",
               labels[0].label)
 
+    # A row and its blip must carry the same number, or they cannot be matched.
+    numbered = place(cfg, 135, 10, 3000, 135, "MAS784", "n1", vs=-800,
+                     route=make_route(callsign="MAS784", callsign_iata="MH784",
+                                      airline_iata="MH", origin_icao="WMKK",
+                                      origin_iata="KUL", origin_city="Kuala Lumpur",
+                                      dest_icao="VTBS", dest_iata="BKK",
+                                      dest_city="Bangkok"))
+    prepared(cfg, [numbered], book)
+    window._render_panel([numbered], {"n1"})
+    plotted = [c.label for c in window._blips if isinstance(c, xbmcgui.ControlLabel)]
+    check("the radar label matches what the board prints",
+          plotted == [numbered.display_number], "%s vs %s"
+          % (plotted, numbered.display_number))
+
     # Two board aircraft in nearly the same place must not stack their labels.
     twins = prepared(cfg, [
         place(cfg, 135, 12.0, 4000, 135, "TWIN1", "t1", vs=-800, route=ARRIVAL_ROUTE),

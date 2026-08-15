@@ -47,7 +47,7 @@ def window_is_open():
 
 
 def describe(flight, fmt):
-    heading = flight.display_callsign
+    heading = flight.display_number
     if flight.route:
         origin = flight.route.origin_city or flight.route.origin_iata
         dest = flight.route.dest_city or flight.route.dest_iata

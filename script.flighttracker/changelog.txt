@@ -1,3 +1,9 @@
+v1.0.4
+- Radar and map labels use the same flight number the board prints. 1.0.3
+  changed the board to the IATA number but left the labels on the radio
+  callsign, so in the split views a row and its aircraft carried different
+  numbers and could not be matched up.
+
 v1.0.3
 - The queue is ranked by track miles instead of ground distance. Ground
   distance alone treated an aircraft seven miles out at 11,000 ft as though it
