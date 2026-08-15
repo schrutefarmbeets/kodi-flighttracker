@@ -71,7 +71,7 @@ normal add-on update flow.
 2. **Settings → File manager → Add source**, and enter this as the path:
 
    ```
-   https://raw.githubusercontent.com/schrutefarmbeets/kodi-flighttracker/main/repo/
+   https://schrutefarmbeets.github.io/kodi-flighttracker/
    ```
 
    Give it a name like `flighttracker`.
@@ -88,6 +88,12 @@ That is the last time you need to touch a zip. To publish an update: bump
 ```
 
 and commit and push. The TV picks it up on its next check.
+
+> Served from GitHub Pages rather than `raw.githubusercontent.com` on purpose.
+> Adding a source makes Kodi *list* the directory, and raw.githubusercontent
+> returns 404 for any directory path, so a source pointing at it can never be
+> added. Pages serves a real site, and `make_repo.ps1` writes an `index.html`
+> into each directory for Kodi to parse.
 
 ### From a zip — one-off, no auto-updates
 

@@ -4,8 +4,8 @@ dist/
 # Machine-local tool settings, not part of the addon.
 .claude/
 
-# The repo/ directory is deliberately NOT ignored: it is the published Kodi
-# repository that the TV fetches over raw.githubusercontent.com.
+# The docs/ directory is deliberately NOT ignored: GitHub Pages serves it, and
+# that is where the TV fetches the addon and its updates from.
 
 __pycache__/
 *.py[cod]

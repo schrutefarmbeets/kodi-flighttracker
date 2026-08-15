@@ -1,8 +1,8 @@
-# Kodi fetches everything under repo/ byte for byte and checks addons.xml
+# Kodi fetches everything under docs/ byte for byte and checks addons.xml
 # against addons.xml.md5. Any line-ending conversion on the way in or out
 # changes those bytes, the checksum stops matching, and Kodi quietly declines
 # the update. So nothing in there gets touched.
-repo/** -text
+docs/** -text
 
 *.zip binary
 *.png binary
