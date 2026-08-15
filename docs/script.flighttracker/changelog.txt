@@ -1,3 +1,27 @@
+v1.1.0
+- The board is two slots side by side, landing on the left and take-off on the
+  right, one aircraft each. A slot holds its aircraft until it has finished and
+  only then moves to the next in its queue, so a card follows one flight all
+  the way down instead of reshuffling under you every poll.
+- The handover does not wait for the altitude to reach zero, because it never
+  does: the ground filter, the altitude floor and the approach range each drop
+  an aircraft before it touches down. A slot watches for the aircraft leaving
+  the feed instead, waits out an ordinary coverage dropout, holds LANDED or
+  AIRBORNE for a moment so the moment is visible, and gives up on anything that
+  has clearly gone around.
+- New look. Near-black cards on black, the route as two airport codes either
+  side of a hairline, the airports spelled out in fine print below, and colour
+  spent only on the status pill. The pill uses the same colours as the radar
+  blips, so a card and its aircraft can be matched by eye.
+- Each card shows a photograph of that exact airframe, by registration, from
+  Planespotters, with the photographer credited. Fetched in the background and
+  kept, so it costs one request per aircraft ever.
+- An airline whose route is unknown keeps its logo. The logo source is keyed on
+  the IATA code, which only the route carried, so a missing route used to cost
+  the logo too. The callsign gives the same answer.
+- Routes fall back to a second source when the first does not know the flight.
+  Thai Vietjet was missing from the first entirely.
+
 v1.0.4
 - Radar and map labels use the same flight number the board prints. 1.0.3
   changed the board to the IATA number but left the labels on the radio
