@@ -48,6 +48,12 @@ class Config(object):
         self.show_departures = True
         self.show_overflights = False
 
+        # The board is the runway queue: this many aircraft, and only those
+        # already this close to the runway, so everything on it is genuinely
+        # landing or taking off rather than merely heading this way.
+        self.board_rows = 3
+        self.approach_range_nm = 15
+
         self.view_mode = VIEW_BOARD
         self.show_logos = True
         self.flap_animation = True
@@ -133,6 +139,8 @@ def from_addon(addon):
     cfg.show_arrivals = b("show_arrivals", cfg.show_arrivals)
     cfg.show_departures = b("show_departures", cfg.show_departures)
     cfg.show_overflights = b("show_overflights", cfg.show_overflights)
+    cfg.board_rows = i("board_rows", cfg.board_rows)
+    cfg.approach_range_nm = i("approach_range_nm", cfg.approach_range_nm)
 
     cfg.view_mode = i("view_mode", cfg.view_mode)
     cfg.show_logos = b("show_logos", cfg.show_logos)

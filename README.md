@@ -12,23 +12,34 @@ airport are all settings, so it works at any airport you can see from a window.
 
 ## What it shows
 
-Not a list to scan. The board shows what is happening **right now**: the aircraft
-currently on final approach, and the one currently climbing out.
+Not a list to scan. The board is the **runway queue**: the two or three aircraft
+lined up to land, plus anything on the roll, ranked purely by how close each one
+is to the runway.
 
 ```
   ┌──────────┐   ARRIVAL                                    LANDING
   │   THAI   │   TOKYO  >  BANGKOK
   └──────────┘   THA641   787 8   HS-TQE
 
-  ┌──────────┐   DEPARTURE                               TAKING OFF
-  │ Air Asia │   BANGKOK  >  KRABI
-  └──────────┘   AIQ3215   A21N   HS-EAD
+  ┌──────────┐   DEPARTURE                                 TAKE OFF
+  │  QATAR   │   BANGKOK  >  DOHA
+  └──────────┘   QTR834   777-300ER
+
+  ┌──────────┐   ARRIVAL                                    LANDING
+  │ EMIRATES │   DUBAI  >  BANGKOK
+  └──────────┘   UAE384   A380-800
 ```
 
-Amber on black, in the register a real airport board uses: `LANDING`, `ON FINAL`,
-`APPROACHING`, `TAKING OFF`, `CLIMBING OUT`. Each row carries the airline's logo,
-the route, the flight number and the airframe. When a row changes, the letters
-flip over to the new text a character at a time.
+Two words only: `LANDING` and `TAKE OFF`. Anything not yet close enough to the
+runway simply does not appear, rather than being shown under some softer wording
+like "approaching" — so everything on the board is genuinely landing or leaving.
+The cut-off defaults to 15 nm, roughly the last few minutes before touchdown.
+
+Because it is one queue rather than fixed slots, an aircraft that has just
+rotated can sit above one still on approach, and during an arrival rush all
+three rows can be landings. Each row carries the airline's logo, the route, the
+flight number and the airframe. When a row changes, the letters flip over to the
+new text a character at a time.
 
 ### Three views
 
@@ -177,7 +188,9 @@ to stop filtering by direction at all.
 | Data source | Secondary airport | Empty by default. Only add one if you can genuinely see it too — see below. |
 | Data source | Look up origin and destination | The route lookups. Cached on disk. |
 | Filters | Min / Max altitude | Hide ground clutter, or hide high overflights. |
-| Filters | Show arrivals / departures / overflights | Independent switches. Overflights off by default. |
+| Filters | Show arrivals / departures / overflights | Independent switches. Overflights off by default, and they only ever fill a row the runway has left empty. |
+| Filters | Aircraft on the board | 1 to 4 rows. Three by default. |
+| Filters | Show aircraft within | How close to the runway an aircraft must be to appear. 15 nm is the last few minutes before touchdown; raise it to catch them joining the approach earlier. |
 | Display | View | Board only, board with radar, or board with map. |
 | Display | Show airline logos | Fetched once per airline and cached on disk forever. |
 | Display | Split-flap animation | Letters flip over when a row changes. Turn off for a plain switch. |

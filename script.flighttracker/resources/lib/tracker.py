@@ -114,43 +114,43 @@ class Tracker(object):
 
     # ---------------------------------------------------------------- now
     def select_now(self, flights):
-        """The one or two or three aircraft that matter at this moment.
+        """The runway queue: what is landing or taking off at this moment.
 
-        Not the nearest aircraft: the one actually on final approach and the
-        one actually climbing out, which is what you look up to watch.
+        One list ranked purely by how close each aircraft is to the runway, so
+        an airliner that has just rotated can sit above one still on approach.
+        Anything beyond the approach range is left off entirely rather than
+        shown with some softer wording, which keeps every row on the board
+        genuinely a landing or a take-off.
         """
         cfg = self.cfg
-        rows = []
-        if cfg.show_arrivals:
-            pick = self._nearest_runway(flights, KIND_ARRIVAL)
-            if pick is not None:
-                rows.append((SLOT_ARRIVAL, pick))
-        if cfg.show_departures:
-            pick = self._nearest_runway(flights, KIND_DEPARTURE)
-            if pick is not None:
-                rows.append((SLOT_DEPARTURE, pick))
-        if cfg.show_overflights:
+        limit = max(1, int(cfg.board_rows))
+        reach = float(cfg.approach_range_nm)
+
+        queue = []
+        for flight in flights:
+            if not flight.is_airliner:
+                continue
+            if flight.kind == KIND_ARRIVAL and cfg.show_arrivals:
+                slot = SLOT_ARRIVAL
+            elif flight.kind == KIND_DEPARTURE and cfg.show_departures:
+                slot = SLOT_DEPARTURE
+            else:
+                continue
+            distance = flight.airport_dist_nm
+            if distance is None or distance > reach:
+                continue
+            queue.append((distance, slot, flight))
+
+        queue.sort(key=lambda item: item[0])
+        rows = [(slot, flight) for _, slot, flight in queue[:limit]]
+
+        # Overflights are not runway traffic, so they only ever fill a row the
+        # airport itself has left empty.
+        if cfg.show_overflights and len(rows) < limit:
             pick = self._nearest_to_home(flights, (KIND_OVERFLIGHT, KIND_UNKNOWN))
             if pick is not None:
                 rows.append((SLOT_OVERFLIGHT, pick))
         return rows
-
-    @staticmethod
-    def _nearest_runway(flights, kind):
-        """Whichever airliner of this kind is closest to the runway."""
-        best = None
-        best_score = None
-        for flight in flights:
-            if flight.kind != kind or not flight.is_airliner:
-                continue
-            score = flight.airport_dist_nm
-            if score is None:
-                score = flight.distance_nm
-            if score is None:
-                continue
-            if best_score is None or score < best_score:
-                best, best_score = flight, score
-        return best
 
     @staticmethod
     def _nearest_to_home(flights, kinds):

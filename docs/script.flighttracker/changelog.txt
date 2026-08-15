@@ -1,3 +1,15 @@
+v1.0.2
+- The board is the runway queue. Instead of one arrival and one departure, it
+  shows the two or three aircraft closest to the runway, whichever they are, so
+  during an arrival rush you see the whole landing sequence.
+- Only two words now: LANDING and TAKE OFF. ON FINAL, APPROACHING, CLIMBING OUT
+  and INBOUND read as jargon and made the board harder to take in at a glance.
+- Aircraft further out than the approach range are left off entirely rather
+  than shown under softer wording, so everything on the board is really
+  landing or leaving. Defaults to 15 nm.
+- Two new settings: how many aircraft the board shows, and how close they must
+  be to reach it.
+
 v1.0.1
 - What an aircraft is plainly doing now outranks the route database. Long
   flights that keep one callsign across several sectors, such as KL843 from

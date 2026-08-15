@@ -393,3 +393,15 @@ msgstr ""
 msgctxt "#30122"
 msgid "View"
 msgstr ""
+
+msgctxt "#30098"
+msgid "Aircraft on the board"
+msgstr ""
+
+msgctxt "#30099"
+msgid "Show aircraft within (nm)"
+msgstr ""
+
+msgctxt "#30123"
+msgid "How close to the runway an aircraft must be to reach the board. About 15 nm is the last few minutes before touchdown. Raise it to see them join the approach earlier."
+msgstr ""

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="script.flighttracker"
        name="Flight Tracker"
-       version="1.0.1"
+       version="1.0.2"
        provider-name="schrutefarmbeets">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
@@ -24,6 +24,6 @@ Arrivals, departures and overflights are independent switches. Uses free, key-fr
       <icon>resources/media/icon.png</icon>
       <fanart>resources/media/fanart.jpg</fanart>
     </assets>
-    <news>v1.0.1 - An aircraft on short final now reads as an arrival even when the route database disagrees, which fixes multi-sector flights such as KL843 showing as departures while landing.</news>
+    <news>v1.0.2 - The board is now the runway queue: two or three aircraft ranked by how close they are to the runway, labelled only LANDING or TAKE OFF. Anything further out than the approach range is left off rather than shown as approaching.</news>
   </extension>
 </addon>

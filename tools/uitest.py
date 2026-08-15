@@ -126,11 +126,18 @@ LONG_ROUTE = make_route(
     dest_icao="VTSF", dest_iata="NST", dest_city="Nakhon Si Thammarat")
 
 
+# Suvarnabhumi, so aircraft can be positioned relative to the runway rather
+# than to the window. The board now measures from the runway.
+VTBS = (13.6811, 100.7471)
+VTBD = (13.9126, 100.6070)
+
+
 def place(cfg, bearing, distance_nm, alt_ft, track, callsign, hexid, vs=0, route=None,
-          category="A3"):
-    lat = cfg.home_lat + (distance_nm / 60.0) * math.cos(math.radians(bearing))
-    lon = cfg.home_lon + (distance_nm / 60.0) * math.sin(math.radians(bearing)) / \
-        math.cos(math.radians(cfg.home_lat))
+          category="A3", anchor=None):
+    origin_lat, origin_lon = anchor if anchor else (cfg.home_lat, cfg.home_lon)
+    lat = origin_lat + (distance_nm / 60.0) * math.cos(math.radians(bearing))
+    lon = origin_lon + (distance_nm / 60.0) * math.sin(math.radians(bearing)) / \
+        math.cos(math.radians(origin_lat))
     flight = Flight.from_raw({
         "hex": hexid, "flight": callsign, "lat": lat, "lon": lon,
         "alt_baro": alt_ft, "gs": 300, "track": track, "baro_rate": vs,
@@ -181,8 +188,10 @@ def test_one_airport():
         callsign="AIQ3360", airline="Thai AirAsia", airline_iata="FD",
         origin_icao="VTBD", origin_iata="DMK", origin_city="Bangkok",
         dest_icao="VTUU", dest_iata="UBP", dest_city="Ubon Ratchathani")
-    dmk = place(cfg, 350, 14, 5000, 30, "AIQ3360", "d1", vs=2000, route=dmk_route)
-    bkk = place(cfg, 120, 10, 3000, 20, "THA132", "d2", vs=2000, route=DEPARTURE_ROUTE)
+    dmk = place(cfg, 30, 3, 5000, 30, "AIQ3360", "d1", vs=2000, route=dmk_route,
+                anchor=VTBD)
+    bkk = place(cfg, 20, 4, 3000, 20, "THA132", "d2", vs=2000, route=DEPARTURE_ROUTE,
+                anchor=VTBS)
     prepared(cfg, [dmk, bkk], book)
 
     check("Don Mueang traffic is not a departure here", dmk.kind != "departure", dmk.kind)
@@ -218,7 +227,8 @@ def test_multisector_callsign():
         origin_icao="VTBS", origin_iata="BKK", origin_city="Bangkok",
         dest_icao="RCTP", dest_iata="TPE", dest_city="Taipei")
 
-    landing = place(cfg, 118, 2.5, 675, 200, "KLM843", "k1", vs=-768, route=onward)
+    landing = place(cfg, 20, 3, 675, 200, "KLM843", "k1", vs=-768, route=onward,
+                    anchor=VTBS)
     prepared(cfg, [landing], book)
 
     check("short final reads as an arrival", landing.kind == "arrival", landing.kind)
@@ -233,7 +243,8 @@ def test_multisector_callsign():
     print("       renders as: %s   [%s]" % (text, board_status(landing)))
 
     # A genuine departure on the same numbers must still read as one.
-    climbing = place(cfg, 118, 5, 3000, 20, "KLM843", "k2", vs=2200, route=onward)
+    climbing = place(cfg, 20, 5, 3000, 20, "KLM843", "k2", vs=2200, route=onward,
+                     anchor=VTBS)
     prepared(cfg, [climbing], book)
     check("a real departure still reads as one", climbing.kind == "departure", climbing.kind)
     check("and keeps its route", climbing.route_conflict is None)
@@ -246,80 +257,105 @@ def test_multisector_callsign():
         callsign="THA916", airline="Thai Airways International", airline_iata="TG",
         origin_icao="EGLL", origin_iata="LHR", origin_city="London",
         dest_icao="VTBS", dest_iata="BKK", dest_city="Bangkok")
-    goaround = place(cfg, 118, 4, 2500, 200, "THA916", "k3", vs=1800, route=inbound)
+    goaround = place(cfg, 20, 4, 2500, 200, "THA916", "k3", vs=1800, route=inbound,
+                     anchor=VTBS)
     prepared(cfg, [goaround], book)
     check("a go-around stays an arrival", goaround.kind == "arrival", goaround.kind)
 
     # And cruising traffic high overhead is untouched by any of this.
-    cruising = place(cfg, 118, 8, 34000, 90, "SIA999", "k4", vs=0)
+    cruising = place(cfg, 20, 8, 34000, 90, "SIA999", "k4", vs=0, anchor=VTBS)
     prepared(cfg, [cruising], book)
     check("high overflight is not dragged into the terminal logic",
           cruising.kind != "arrival", cruising.kind)
     window._stop.set()
 
 
-def test_selection():
-    print("\n[now selection]")
-    cfg = config.Config(airport_primary="VTBS", airport_secondary="VTBD",
-                        show_arrivals=True, show_departures=True, show_overflights=False)
+def test_runway_queue():
+    """The board is the runway queue, ranked by distance to the runway."""
+    print("\n[runway queue]")
+    cfg = config.Config(show_arrivals=True, show_departures=True,
+                        show_overflights=False, board_rows=3, approach_range_nm=15)
     window = build_window(cfg)
     book = window.tracker.store.airports
 
-    # Two arrivals: one on short final, one still a long way out.
-    near = place(cfg, 110, 8, 1800, 200, "UAE384", "a1", vs=-900, route=ARRIVAL_ROUTE)
-    far = place(cfg, 100, 40, 18000, 200, "UAE999", "a2", vs=-1200, route=ARRIVAL_ROUTE)
-    departing = place(cfg, 120, 12, 4000, 20, "THA132", "b1", vs=2000, route=DEPARTURE_ROUTE)
-    overflight = place(cfg, 300, 20, 37000, 90, "QTR970", "c1", vs=0,
+    # A landing sequence, one aircraft just off the runway, one still miles
+    # out, and a helicopter loitering near the field.
+    a1 = place(cfg, 20, 2, 900, 200, "UAE384", "q1", vs=-700,
+               route=ARRIVAL_ROUTE, anchor=VTBS)
+    d1 = place(cfg, 200, 4, 2000, 20, "THA132", "q2", vs=2400,
+               route=DEPARTURE_ROUTE, anchor=VTBS)
+    a2 = place(cfg, 20, 6, 2400, 200, "SIA978", "q3", vs=-900,
+               route=ARRIVAL_ROUTE, anchor=VTBS)
+    a3 = place(cfg, 20, 11, 5000, 200, "QTR834", "q4", vs=-1100,
+               route=ARRIVAL_ROUTE, anchor=VTBS)
+    far = place(cfg, 20, 40, 18000, 200, "UAE999", "q5", vs=-1200,
+                route=ARRIVAL_ROUTE, anchor=VTBS)
+    heli = place(cfg, 20, 3, 700, 200, "MNRE5120", "q6", vs=-300,
+                 category="A7", anchor=VTBS)
+    flights = prepared(cfg, [a3, far, d1, heli, a1, a2], book)
+
+    rows = window.tracker.select_now(flights)
+    order = [f.callsign for _, f in rows]
+    check("capped at the configured row count", len(rows) == 3, str(len(rows)))
+    check("ranked by distance to the runway",
+          order == ["UAE384", "THA132", "SIA978"], str(order))
+    check("a departure can outrank a more distant arrival",
+          order.index("THA132") < order.index("SIA978"), str(order))
+    check("traffic beyond the approach range is left off",
+          "UAE999" not in order, str(order))
+    check("the fourth in the queue does not fit", "QTR834" not in order, str(order))
+    check("rotorcraft never reaches the board", "MNRE5120" not in order, str(order))
+    check("rotorcraft is not treated as an airliner", not heli.is_airliner)
+    check("uncategorised traffic still counts as an airliner",
+          place(cfg, 20, 4, 1800, 200, "X", "x1", category="A0", anchor=VTBS).is_airliner)
+
+    # Only two words on the board.
+    words = set(board_status(f) for _, f in rows)
+    check("statuses are only LANDING and TAKE OFF",
+          words <= {"LANDING", "TAKE OFF"}, str(sorted(words)))
+    check("a distant inbound would still read LANDING if shown",
+          board_status(far) == "LANDING", board_status(far))
+    check("slot label never repeats the status",
+          SLOT_HEADINGS[SLOT_DEPARTURE] != board_status(d1),
+          SLOT_HEADINGS[SLOT_DEPARTURE])
+
+    # Row count is configurable.
+    cfg.board_rows = 2
+    check("row count setting is honoured", len(window.tracker.select_now(flights)) == 2)
+    cfg.board_rows = 3
+
+    # Tightening the approach range shortens the queue.
+    cfg.approach_range_nm = 5
+    tight = [f.callsign for _, f in window.tracker.select_now(flights)]
+    check("a tighter approach range drops the further ones",
+          tight == ["UAE384", "THA132"], str(tight))
+    cfg.approach_range_nm = 15
+
+    # Category switches.
+    cfg.show_departures = False
+    arrivals_only = [f.callsign for _, f in window.tracker.select_now(flights)]
+    check("departures can be switched off",
+          arrivals_only == ["UAE384", "SIA978", "QTR834"], str(arrivals_only))
+    cfg.show_departures = True
+
+    cfg.show_arrivals = False
+    departures_only = [f.callsign for _, f in window.tracker.select_now(flights)]
+    check("arrivals can be switched off", departures_only == ["THA132"],
+          str(departures_only))
+    cfg.show_arrivals = True
+
+    # An overflight only ever fills a row the runway has left empty.
+    overflight = place(cfg, 300, 20, 37000, 90, "QTR970", "q7", vs=0,
                        route=make_route(origin_icao="OTHH", origin_iata="DOH",
                                         origin_city="Doha", dest_icao="WSSS",
                                         dest_iata="SIN", dest_city="Singapore"))
-    flights = prepared(cfg, [far, near, departing, overflight], book)
-
-    check("near arrival classified", near.kind == "arrival", near.kind)
-    check("departure classified", departing.kind == "departure", departing.kind)
-    check("overflight classified", overflight.kind == "overflight", overflight.kind)
-
-    rows = window.tracker.select_now(flights)
-    check("two slots with arrivals and departures on", len(rows) == 2, str(len(rows)))
-    slots = [slot for slot, _ in rows]
-    check("arrival slot first", slots[0] == SLOT_ARRIVAL, str(slots))
-    check("departure slot second", slots[1] == SLOT_DEPARTURE, str(slots))
-    check("picks the arrival nearest the runway", rows[0][1] is near,
-          rows[0][1].callsign)
-
+    prepared(cfg, [overflight], book)
     cfg.show_overflights = True
-    rows = window.tracker.select_now(flights)
-    check("overflight adds a third slot", len(rows) == 3, str(len(rows)))
-
-    cfg.show_arrivals = False
-    cfg.show_overflights = False
-    rows = window.tracker.select_now(flights)
-    check("arrivals can be switched off", len(rows) == 1 and rows[0][0] == SLOT_DEPARTURE,
-          str([s for s, _ in rows]))
-
-    # A helicopter pottering about near the runway must not take the arrival
-    # slot just because it happens to be low and descending.
-    cfg.show_arrivals = True
-    cfg.show_overflights = False
-    chopper = place(cfg, 112, 3, 700, 200, "MNRE5120", "h1", vs=-300, category="A7")
-    prepared(cfg, [chopper], book)
-    rows = window.tracker.select_now([chopper, near, departing])
-    arrival = dict(rows).get(SLOT_ARRIVAL)
-    check("rotorcraft is kept off the board", arrival is near,
-          arrival.callsign if arrival else "no arrival slot")
-    check("rotorcraft is not treated as an airliner", not chopper.is_airliner)
-    check("uncategorised traffic still counts as an airliner",
-          place(cfg, 110, 8, 1800, 200, "X", "x1", category="A0").is_airliner)
-
-    # Status wording
-    check("short final reads LANDING", board_status(near) == "LANDING", board_status(near))
-    check("distant inbound reads APPROACHING",
-          board_status(far) in ("APPROACHING", "ON FINAL"), board_status(far))
-    check("climbing out reads as a departure",
-          board_status(departing) in ("TAKING OFF", "CLIMBING OUT"), board_status(departing))
-    check("slot label never repeats the status",
-          SLOT_HEADINGS[SLOT_DEPARTURE] != board_status(departing),
-          SLOT_HEADINGS[SLOT_DEPARTURE])
+    full = [f.callsign for _, f in window.tracker.select_now(flights + [overflight])]
+    check("a full runway queue leaves no room for an overflight",
+          "QTR970" not in full, str(full))
+    quiet = [f.callsign for _, f in window.tracker.select_now([a1, overflight])]
+    check("a quiet runway lets one through", "QTR970" in quiet, str(quiet))
     window._stop.set()
 
 
@@ -330,8 +366,10 @@ def test_board():
     window = build_window(cfg)
     book = window.tracker.store.airports
 
-    near = place(cfg, 110, 8, 1800, 200, "UAE384", "a1", vs=-900, route=ARRIVAL_ROUTE)
-    departing = place(cfg, 120, 12, 4000, 20, "THA132", "b1", vs=2000, route=DEPARTURE_ROUTE)
+    near = place(cfg, 20, 3, 1800, 200, "UAE384", "a1", vs=-900,
+                 route=ARRIVAL_ROUTE, anchor=VTBS)
+    departing = place(cfg, 200, 5, 4000, 20, "THA132", "b1", vs=2000,
+                      route=DEPARTURE_ROUTE, anchor=VTBS)
     flights = prepared(cfg, [near, departing], book)
 
     window._render(PollResult(flights))
@@ -362,7 +400,8 @@ def test_board():
     check("arrival names its origin", "DUBAI" in window._rows[0]["texts"]["route"])
 
     # A long city pair must degrade to codes rather than spill over.
-    long_flight = place(cfg, 110, 9, 3000, 200, "TLM786", "d1", vs=1500, route=LONG_ROUTE)
+    long_flight = place(cfg, 200, 4, 3000, 200, "TLM786", "d1", vs=1500,
+                        route=LONG_ROUTE, anchor=VTBS)
     prepared(cfg, [long_flight], book)
     narrow = window._rows[0]
     text = window._route_text(long_flight, narrow["route_chars"])
@@ -537,7 +576,7 @@ def main():
     test_settings_wiring()
     test_one_airport()
     test_multisector_callsign()
-    test_selection()
+    test_runway_queue()
     test_board()
     test_flap()
     test_panels()

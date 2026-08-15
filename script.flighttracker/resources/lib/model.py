@@ -57,32 +57,17 @@ SLOT_HEADINGS = {
 
 
 def board_status(flight):
-    """The word a departure board would show, in its own register.
+    """The word a departure board would show.
 
-    Driven by range to the runway rather than range to you, because that is
-    what decides whether an aircraft is on final or still inbound.
+    Only two of them for runway traffic. Grading it into ON FINAL, APPROACHING,
+    CLIMBING OUT and so on read as jargon and made the board harder to scan;
+    the approach-range filter already guarantees that anything reaching the
+    board is genuinely landing or taking off.
     """
-    distance = flight.airport_dist_nm
-    altitude = flight.alt_ft or 0
-
     if flight.kind == KIND_ARRIVAL:
-        if distance is not None:
-            if distance <= 6 or altitude <= 2000:
-                return "LANDING"
-            if distance <= 20:
-                return "ON FINAL"
-            if distance <= 60:
-                return "APPROACHING"
-        return "INBOUND"
-
+        return "LANDING"
     if flight.kind == KIND_DEPARTURE:
-        if distance is not None:
-            if distance <= 8 and altitude <= 6000:
-                return "TAKING OFF"
-            if distance <= 30:
-                return "CLIMBING OUT"
-        return "OUTBOUND"
-
+        return "TAKE OFF"
     if flight.elevation_deg is not None and flight.elevation_deg >= 55:
         return "OVERHEAD"
     return "PASSING"
