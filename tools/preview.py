@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +28,7 @@ import xbmcgui  # noqa: E402
 
 from resources.lib import config, gui  # noqa: E402
 from resources.lib.logos import LogoStore  # noqa: E402
+from resources.lib.photos import PhotoStore  # noqa: E402
 from resources.lib.tracker import PollResult, Tracker  # noqa: E402
 
 MEDIA = os.path.join(ADDON_ROOT, "resources", "media")
@@ -196,7 +198,7 @@ def render_button(control, label, focused):
                fill_text, text_opacity, esc(label))]
 
 
-def build(view_mode, offline=False, tracker=None, logos=None):
+def build(view_mode, offline=False, tracker=None, logos=None, snaps=None):
     cfg = config.from_addon(xbmcaddon.Addon())
     cfg.view_mode = view_mode
 
@@ -210,7 +212,8 @@ def build(view_mode, offline=False, tracker=None, logos=None):
         tracker = Tracker(cfg, cache)
     else:
         tracker.update_config(cfg)
-    window.prepare(xbmcaddon.Addon(), cfg, tracker, MEDIA, lambda: cfg, logo_store=logos)
+    window.prepare(xbmcaddon.Addon(), cfg, tracker, MEDIA, lambda: cfg,
+                   logo_store=logos, photo_store=snaps)
 
     window._sync_panel_visibility()
     window._sync_buttons()
@@ -221,6 +224,14 @@ def build(view_mode, offline=False, tracker=None, logos=None):
     else:
         result = tracker.poll()
     window._render(result)
+    # The first render only asks for the photographs; they arrive on background
+    # threads that die with the process. Wait for them and draw the same poll
+    # again, so the preview shows the card as Kodi would a few seconds later.
+    if snaps is not None and snaps.pending():
+        deadline = time.time() + 15
+        while snaps.pending() and time.time() < deadline:
+            time.sleep(0.3)
+        window._render(result)
     window._stop.set()
 
     runtime = {str(cid): window.controls[cid].label for cid in window.controls}
@@ -284,11 +295,12 @@ def main():
 
     out_dir = os.path.join(os.path.dirname(HERE), "dist")
     logos = LogoStore(os.path.join(out_dir, "logocache"))
+    snaps = PhotoStore(os.path.join(out_dir, "photocache"))
     tracker = None
     pages = []
 
     for name in views:
-        svg, window, tracker = build(VIEW_NAMES[name], offline, tracker, logos)
+        svg, window, tracker = build(VIEW_NAMES[name], offline, tracker, logos, snaps)
         path = os.path.join(out_dir, "preview-%s.svg" % name)
         write(path, svg)
         pages.append((name, svg))
@@ -296,10 +308,14 @@ def main():
         print("  %s | %s" % (window.controls[gui.TITLE_ID].label,
                              window.controls[gui.STATUS_ID].label))
         for row in window._rows:
-            print("  %-13s %-34s %s" % (row["texts"].get("slot", ""),
-                                        row["texts"].get("route", ""),
-                                        row["texts"].get("status", "")))
-            print("  %-13s %s" % ("", row["texts"].get("flight", "")))
+            texts = row["texts"]
+            print("  %-9s %-4s %-18s > %-18s %s"
+                  % (texts.get("pill", ""), "",
+                     "%s %s" % (texts.get("origin_code", ""), texts.get("origin_city", "")),
+                     "%s %s" % (texts.get("dest_code", ""), texts.get("dest_city", "")),
+                     texts.get("meta", "")))
+            print("  %-9s %s / %s / %s" % ("", texts.get("alt", ""),
+                                           texts.get("speed", ""), texts.get("dist", "")))
         if not window._rows:
             print("  (nothing on approach or departure right now)")
 

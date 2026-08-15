@@ -47,6 +47,13 @@ class ControlImage(ControlBase):
             raise TypeError("setImage needs a string, got %r" % (filename,))
         self.filename = filename
 
+    def setColorDiffuse(self, colorDiffuse):
+        if not isinstance(colorDiffuse, str):
+            raise TypeError("setColorDiffuse needs a string, got %r" % (colorDiffuse,))
+        if colorDiffuse and not colorDiffuse.startswith("0x"):
+            raise ValueError("colorDiffuse should look like 0xAARRGGBB, got %r" % colorDiffuse)
+        self.colorDiffuse = colorDiffuse
+
 
 class ControlLabel(ControlBase):
     def __init__(self, x, y, width, height, label, font=None, textColor=None,

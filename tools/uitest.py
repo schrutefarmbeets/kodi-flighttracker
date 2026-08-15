@@ -11,6 +11,7 @@ import math
 import os
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -236,11 +237,12 @@ def test_multisector_callsign():
     check("the stale route is flagged", landing.route_conflict == "onward",
           str(landing.route_conflict))
 
-    text = window._route_text(landing, 40)
+    o_city, o_code, d_city, d_code = window._route_parts(landing)
     check("the board does not claim it departed Bangkok",
-          not text.startswith("BANGKOK"), text)
-    check("it says where the flight goes next", "TAIPEI" in text, text)
-    print("       renders as: %s   [%s]" % (text, board_status(landing)))
+          o_code == "--" and not o_city, "%s %s" % (o_code, o_city))
+    check("it says where the flight goes next", "Taipei" in d_city, d_city)
+    print("       renders as: %s %s  >  %s %s   [%s]"
+          % (o_code, o_city, d_code, d_city, board_status(landing)))
 
     # A genuine departure on the same numbers must still read as one.
     climbing = place(cfg, 20, 5, 3000, 20, "KLM843", "k2", vs=2200, route=onward,
@@ -248,8 +250,9 @@ def test_multisector_callsign():
     prepared(cfg, [climbing], book)
     check("a real departure still reads as one", climbing.kind == "departure", climbing.kind)
     check("and keeps its route", climbing.route_conflict is None)
-    print("       renders as: %s   [%s]"
-          % (window._route_text(climbing, 40), board_status(climbing)))
+    parts = window._route_parts(climbing)
+    print("       renders as: %s %s  >  %s %s   [%s]"
+          % (parts[1], parts[0], parts[3], parts[2], board_status(climbing)))
 
     # A go-around climbing away must not be flipped to a departure when the
     # route says it is inbound here.
@@ -418,41 +421,71 @@ def test_board():
     check("two rows built", len(window._rows) == 2, str(len(window._rows)))
 
     for row in window._rows:
-        for key in ("slot", "status", "route", "flight"):
+        for key in ("pill", "meta", "origin_code", "dest_code", "alt", "speed", "dist"):
             value = row["texts"].get(key, "")
             check("row %s is filled in" % key, isinstance(value, str) and value != "",
                   repr(value))
-        check("route is uppercase", row["texts"]["route"] == row["texts"]["route"].upper())
+        check("codes are uppercase",
+              row["texts"]["origin_code"] == row["texts"]["origin_code"].upper())
         # The overflow class of bug: text must fit the box it was measured for.
-        check("route fits its box",
-              len(row["texts"]["route"]) <= row["route_chars"],
-              "%d chars in %d" % (len(row["texts"]["route"]), row["route_chars"]))
         check("flight line fits its box",
-              len(row["texts"]["flight"]) <= row["flight_chars"],
-              "%d chars in %d" % (len(row["texts"]["flight"]), row["flight_chars"]))
+              len(row["texts"]["meta"]) <= row["meta_chars"],
+              "%d chars in %d" % (len(row["texts"]["meta"]), row["meta_chars"]))
+        for side in ("origin_city", "dest_city"):
+            if side in row["texts"]:
+                check("%s fits its box" % side,
+                      len(row["texts"][side]) <= row["city_chars"],
+                      "%d chars in %d" % (len(row["texts"][side]), row["city_chars"]))
 
     for row in window._rows:
-        print("       %s | %s | %s" % (row["texts"]["slot"], row["texts"]["route"],
-                                       row["texts"]["status"]))
+        print("       %-9s %s %s  >  %s %s"
+              % (row["texts"]["pill"], row["texts"]["origin_code"],
+                 row["texts"].get("origin_city", ""), row["texts"]["dest_code"],
+                 row["texts"].get("dest_city", "")))
 
     # Rows are ranked by track miles, so which one lands where is not fixed.
-    by_slot = {row["texts"]["slot"]: row for row in window._rows}
+    # The pill is what now distinguishes them, in words and in colour.
+    by_status = {row["texts"]["pill"]: row for row in window._rows}
     check("both an arrival and a departure are on the board",
-          set(by_slot) == {"ARRIVAL", "DEPARTURE"}, str(sorted(by_slot)))
-    arrival_row = by_slot.get("ARRIVAL")
-    check("route names both ends", ">" in arrival_row["texts"]["route"])
-    check("arrival names its origin", "DUBAI" in arrival_row["texts"]["route"],
-          arrival_row["texts"]["route"])
+          set(by_status) == {"LANDING", "TAKE OFF"}, str(sorted(by_status)))
+    arrival_row = by_status.get("LANDING")
+    check("route names both ends",
+          arrival_row["texts"]["origin_code"] != "--"
+          and arrival_row["texts"]["dest_code"] != "--")
+    # On a tall card the codes stand alone and the airports are spelled out in
+    # the fine print lower down.
+    check("arrival names its origin",
+          "Dubai" in arrival_row["texts"].get("places", ""),
+          arrival_row["texts"].get("places", ""))
+    check("and names the airport, not just the city",
+          "Suvarnabhumi" in arrival_row["texts"].get("places", ""),
+          arrival_row["texts"].get("places", ""))
+    check("the pill is coloured for its slot",
+          arrival_row["texts"]["pill_fill"] == gui.PILL_COLOURS["arrival"][0],
+          arrival_row["texts"]["pill_fill"])
 
-    # A long city pair must degrade to codes rather than spill over.
+    # No logo store, so the badge should carry the airline code. Checked before
+    # the long-route case below, which writes another airline into this row.
+    check("badge falls back to the airline code",
+          arrival_row["texts"].get("badge") == "EK",
+          repr(arrival_row["texts"].get("badge")))
+
+    # A long city name must be trimmed rather than spill across the card.
     long_flight = place(cfg, 200, 4, 3000, 200, "TLM786", "d1", vs=1500,
                         route=LONG_ROUTE, anchor=VTBS)
     prepared(cfg, [long_flight], book)
     narrow = window._rows[0]
-    text = window._route_text(long_flight, narrow["route_chars"])
-    check("long route still fits", len(text) <= narrow["route_chars"],
-          "%r is %d chars, limit %d" % (text, len(text), narrow["route_chars"]))
-    print("       long route renders as: %s" % text)
+    window._update_row(narrow, "departure", long_flight)
+    for side in ("origin_city", "dest_city"):
+        if side in narrow["texts"]:
+            check("long %s still fits" % side,
+                  len(narrow["texts"][side]) <= narrow["city_chars"],
+                  "%r is %d chars, limit %d" % (narrow["texts"][side],
+                                                len(narrow["texts"][side]),
+                                                narrow["city_chars"]))
+    print("       long route renders as: %s %s  >  %s %s"
+          % (narrow["texts"]["origin_code"], narrow["texts"].get("origin_city", ""),
+             narrow["texts"]["dest_code"], narrow["texts"].get("dest_city", "")))
 
     # Textures must exist.
     images = [c for c in window._rows[0]["controls_list"]
@@ -460,16 +493,105 @@ def test_board():
     absent = sorted({c.filename for c in images if not os.path.exists(c.filename)})
     check("every board texture exists", not absent, str(absent))
 
-    # No logo store, so the badge should carry the airline code.
-    check("badge falls back to the airline code",
-          arrival_row["texts"].get("badge") == "EK",
-          repr(arrival_row["texts"].get("badge")))
-
-    # Rows must be rebuilt when the shape changes, not stacked up.
-    before = len(window._rows)
+    # The board is two fixed slots now. Losing the departure does not collapse
+    # the layout: the side holds what it had, calls it airborne for a moment,
+    # and only then goes blank.
+    base = time.time()
+    window._now = lambda: base + gui.HOLD_GRACE_SEC + 1
     window._render(PollResult([near]))
-    check("row count follows the selection", len(window._rows) == 1,
-          "%d then %d" % (before, len(window._rows)))
+    check("the board keeps both slots", len(window._rows) == 2,
+          str(len(window._rows)))
+    check("a departure that vanished is called airborne",
+          window._rows[1]["texts"].get("pill") == "AIRBORNE",
+          repr(window._rows[1]["texts"].get("pill")))
+
+    window._now = lambda: base + gui.HOLD_GRACE_SEC + gui.HOLD_DONE_SEC + 2
+    window._render(PollResult([near]))
+    check("then that side goes blank",
+          window._rows[1]["texts"].get("pill") == "",
+          repr(window._rows[1]["texts"].get("pill")))
+    check("and says what it is waiting for",
+          bool(window._rows[1]["texts"].get("queue")),
+          repr(window._rows[1]["texts"].get("queue")))
+    window._stop.set()
+
+
+def test_handover():
+    """The rule that decides when a card lets go of one flight and takes the next."""
+    print("\n[slot handover]")
+    cfg = config.Config()
+    window = build_window(cfg)
+    book = window.tracker.store.airports
+
+    first = place(cfg, 20, 3, 1200, 200, "UAE384", "h1", vs=-900,
+                  route=ARRIVAL_ROUTE, anchor=VTBS)
+    second = place(cfg, 20, 12, 4000, 200, "THA916", "h2", vs=-900,
+                   route=ARRIVAL_ROUTE, anchor=VTBS)
+    prepared(cfg, [first, second], book)
+
+    holder = gui.SlotHolder(SLOT_ARRIVAL)
+    t = 1000.0
+    check("takes the nearest of the queue",
+          holder.update([first, second], t) is first)
+    check("and reports it as landing", holder.status() == "LANDING", holder.status())
+    check("the rest of the queue is behind it",
+          holder.waiting([first, second]) == [second])
+
+    # A dropout is not a landing: coverage near the ground is patchy and the
+    # card must not flip on one missed poll.
+    t += 5.0
+    check("a brief dropout keeps the same aircraft",
+          holder.update([second], t) is first)
+    check("and still calls it landing", holder.status() == "LANDING")
+
+    t += 2.0
+    check("it comes back without the card having moved",
+          holder.update([first, second], t) is first)
+
+    # Gone for good.
+    t += gui.HOLD_GRACE_SEC + 1
+    check("a sustained absence finishes the flight",
+          holder.update([second], t) is first)
+    check("which reads as landed", holder.status() == "LANDED", holder.status())
+
+    # The word is held for a beat before the next aircraft takes the slot.
+    t += gui.HOLD_DONE_SEC - 1
+    check("the word is held for a moment",
+          holder.update([second], t) is first)
+
+    t += 2.0
+    check("then the next in the queue takes the slot",
+          holder.update([second], t) is second)
+    check("and reads as landing again", holder.status() == "LANDING")
+
+    # A retired aircraft reappearing must not take the slot back.
+    t += 1.0
+    check("a finished flight does not come back",
+          holder.update([first, second], t) is second)
+
+    # On the ground is the other way a flight finishes, when the feed says so.
+    ground = place(cfg, 20, 1, 400, 60, "THA100", "h3", vs=-600,
+                   route=ARRIVAL_ROUTE, anchor=VTBS)
+    prepared(cfg, [ground], book)
+    grounded = gui.SlotHolder(SLOT_ARRIVAL)
+    t = 2000.0
+    grounded.update([ground], t)
+    check("landing while it is still in the air",
+          grounded.status() == "LANDING", grounded.status())
+
+    ground.on_ground = True
+    t += 4.0
+    grounded.update([ground], t)
+    check("touching down finishes it at once", grounded.status() == "LANDED",
+          grounded.status())
+
+    # A go-around must not wedge the slot for the rest of the evening.
+    stuck = gui.SlotHolder(SLOT_ARRIVAL)
+    t = 3000.0
+    stuck.update([first, second], t)
+    t += gui.HOLD_MAX_SEC + 1
+    check("an aircraft that never lands is let go of",
+          stuck.update([first, second], t) is second)
     window._stop.set()
 
 
@@ -607,12 +729,18 @@ def test_live(offline):
 
     if window._rows:
         for row in window._rows:
-            print("       %-12s %-34s %s" % (row["texts"].get("slot", ""),
-                                             row["texts"].get("route", ""),
-                                             row["texts"].get("status", "")))
-            print("                    %s" % row["texts"].get("flight", ""))
-            check("live route fits", len(row["texts"].get("route", "")) <= row["route_chars"],
-                  row["texts"].get("route", ""))
+            texts = row["texts"]
+            print("       %-9s %s %s  >  %s %s"
+                  % (texts.get("pill", ""), texts.get("origin_code", ""),
+                     texts.get("origin_city", ""), texts.get("dest_code", ""),
+                     texts.get("dest_city", "")))
+            print("                 %s" % texts.get("meta", ""))
+            check("live flight line fits",
+                  len(texts.get("meta", "")) <= row["meta_chars"], texts.get("meta", ""))
+            for side in ("origin_city", "dest_city"):
+                if side in texts:
+                    check("live %s fits" % side,
+                          len(texts[side]) <= row["city_chars"], texts[side])
         logo_files = os.listdir(logos.directory)
         print("       logos cached: %s" % (", ".join(logo_files) or "none"))
         check("at least one logo or badge resolved",
@@ -620,6 +748,13 @@ def test_live(offline):
     else:
         print("       nothing on approach or departure at the moment")
 
+    # Both slots have to let go of what they were holding before the board can
+    # honestly say there is nothing on approach: one poll to call it finished,
+    # a later one to release the slot.
+    base = time.time()
+    window._now = lambda: base + gui.HOLD_GRACE_SEC + 1
+    window._render(PollResult([]))
+    window._now = lambda: base + gui.HOLD_GRACE_SEC + gui.HOLD_DONE_SEC + 2
     window._render(PollResult([]))
     check("empty result shows a message", window.controls[gui.MESSAGE_ID].visible)
     window._render(PollResult([], error="boom"))
@@ -637,6 +772,7 @@ def main():
     test_multisector_callsign()
     test_runway_queue()
     test_board()
+    test_handover()
     test_flap()
     test_panels()
     test_live(offline)

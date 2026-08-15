@@ -77,6 +77,8 @@ class AirportBook(object):
 
     def __init__(self, learned=None):
         self._learned = dict(learned or {})
+        self._iata_index = None
+        self._iata_stamp = -1
 
     def get(self, icao):
         if not icao:
@@ -105,6 +107,30 @@ class AirportBook(object):
             "icao": icao, "iata": iata or "", "name": name or icao,
             "city": city or "", "lat": float(lat), "lon": float(lon),
         }
+
+    def by_iata(self, iata):
+        """Look an airport up the other way round, by its two-or-three letter code.
+
+        Some route sources answer in IATA codes alone, so the table has to be
+        readable from that end too. Built on demand and thrown away when the
+        learned set grows, which is rare enough not to matter.
+        """
+        code = (iata or "").strip().upper()
+        if not code:
+            return None
+        index = getattr(self, "_iata_index", None)
+        if index is None or self._iata_stamp != len(self._learned):
+            index = {}
+            for icao, seed in SEED.items():
+                if seed[0]:
+                    index[seed[0]] = {"icao": icao, "iata": seed[0], "name": seed[1],
+                                      "city": seed[2], "lat": seed[3], "lon": seed[4]}
+            for icao, entry in self._learned.items():
+                if entry.get("iata"):
+                    index[entry["iata"].upper()] = entry
+            self._iata_index = index
+            self._iata_stamp = len(self._learned)
+        return index.get(code)
 
     def position(self, icao):
         entry = self.get(icao)

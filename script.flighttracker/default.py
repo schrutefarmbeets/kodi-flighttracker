@@ -24,6 +24,7 @@ if ADDON_PATH not in sys.path:
 from resources.lib import config  # noqa: E402
 from resources.lib import gui  # noqa: E402
 from resources.lib.logos import LogoStore  # noqa: E402
+from resources.lib.photos import PhotoStore  # noqa: E402
 from resources.lib.tracker import Tracker  # noqa: E402
 
 HOME_WINDOW = 10000
@@ -50,6 +51,12 @@ def logo_dir():
     return os.path.join(PROFILE_PATH, "logos")
 
 
+def photo_dir():
+    if not xbmcvfs.exists(PROFILE_PATH):
+        xbmcvfs.mkdirs(PROFILE_PATH)
+    return os.path.join(PROFILE_PATH, "photos")
+
+
 def reload_config():
     return config.from_addon(xbmcaddon.Addon())
 
@@ -71,9 +78,11 @@ def open_window():
 
     tracker = Tracker(cfg, cache_path(), logger=log)
     logos = LogoStore(logo_dir(), logger=log)
+    snaps = PhotoStore(photo_dir(), logger=log)
     window = gui.FlightWindow(gui.XML_NAME, ADDON_PATH, "Default", "1080i")
     try:
-        window.prepare(ADDON, cfg, tracker, media_dir(), reload_config, logo_store=logos)
+        window.prepare(ADDON, cfg, tracker, media_dir(), reload_config,
+                       logo_store=logos, photo_store=snaps)
         window.doModal()
     finally:
         home.clearProperty(OPEN_FLAG)

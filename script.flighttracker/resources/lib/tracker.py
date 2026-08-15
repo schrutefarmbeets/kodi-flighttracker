@@ -153,6 +153,34 @@ class Tracker(object):
                 rows.append((SLOT_OVERFLIGHT, pick))
         return rows
 
+    def select_slots(self, flights):
+        """The same runway queue, split in two and left unranked against itself.
+
+        The board view holds one arrival and one departure side by side, so
+        each side needs its own ordering. Nearest the runway first, which is
+        the order they will actually land or leave in.
+        """
+        cfg = self.cfg
+        reach = float(cfg.approach_range_nm)
+        queues = {SLOT_ARRIVAL: [], SLOT_DEPARTURE: []}
+
+        for flight in flights:
+            if not flight.is_airliner or not flight.hex:
+                continue
+            if flight.kind == KIND_ARRIVAL and cfg.show_arrivals:
+                slot = SLOT_ARRIVAL
+            elif flight.kind == KIND_DEPARTURE and cfg.show_departures:
+                slot = SLOT_DEPARTURE
+            else:
+                continue
+            track = flight.runway_track_nm
+            if track is None or track > reach:
+                continue
+            queues[slot].append((track, flight))
+
+        return dict((slot, [flight for _, flight in sorted(bucket, key=lambda i: i[0])])
+                    for slot, bucket in queues.items())
+
     @staticmethod
     def _nearest_to_home(flights, kinds):
         best = None

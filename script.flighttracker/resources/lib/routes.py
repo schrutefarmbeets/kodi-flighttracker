@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 from .airports import AirportBook
 
 API_BASE = "https://api.adsbdb.com/v0"
+HEXDB_ROUTE = "https://hexdb.io/callsign-route-iata?callsign=%s"
 USER_AGENT = "Kodi-FlightTracker/1.0"
 TIMEOUT = 8
 CACHE_VERSION = 1
@@ -232,16 +233,77 @@ class RouteStore(object):
         if not key:
             return None
         payload, error = self._get("%s/callsign/%s" % (API_BASE, quote(key)))
-        if error == "notfound":
-            self._remember_miss(self._routes, key)
-            return None
-        if error:
+        if error and error != "notfound":
             return None  # transient: do not poison the cache
-        try:
-            return self._store_route(key, payload["response"]["flightroute"])
-        except (KeyError, TypeError):
-            self._remember_miss(self._routes, key)
+        if not error:
+            try:
+                return self._store_route(key, payload["response"]["flightroute"])
+            except (KeyError, TypeError):
+                pass
+
+        # adsbdb is a community database and its coverage runs thin for the
+        # carriers that change their schedules most: Thai Vietjet is not in it
+        # at all. hexdb carries some of what it misses, so it is worth the
+        # second request before writing the callsign off.
+        route = self._fetch_hexdb(key)
+        if route is not None:
+            return route
+        self._remember_miss(self._routes, key)
+        return None
+
+    def _fetch_hexdb(self, key):
+        """Second opinion on a route, as a bare "BKK-KBV" pair of IATA codes."""
+        text, error = self._get_text(HEXDB_ROUTE % quote(key))
+        if error or not text:
             return None
+        parts = text.strip().upper().split("-")
+        if len(parts) != 2:
+            return None
+        origin, dest = (p.strip() for p in parts)
+        if not (2 <= len(origin) <= 4 and 2 <= len(dest) <= 4):
+            return None
+        if not (origin.isalnum() and dest.isalnum()):
+            return None
+
+        # Only codes come back, so the names are filled in from the airport
+        # table where it knows them and left blank where it does not. A card
+        # with a code and no city under it still reads.
+        fields = {"callsign": key}
+        for side, code in (("origin", origin), ("dest", dest)):
+            entry = self.airports.by_iata(code)
+            fields["%s_iata" % side] = code
+            fields["%s_icao" % side] = (entry or {}).get("icao", "")
+            fields["%s_city" % side] = (entry or {}).get("city", "")
+            fields["%s_name" % side] = (entry or {}).get("name", "")
+        route = Route(**fields)
+        self._routes[key] = {"t": time.time(), "ok": True, "d": route.to_dict()}
+        self._dirty = True
+        return route
+
+    def _get_text(self, url):
+        """hexdb answers in plain text, not JSON."""
+        self.requests += 1
+        req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/plain"})
+        try:
+            resp = urlopen(req, timeout=TIMEOUT)
+        except HTTPError as exc:
+            return None, "http%s" % exc.code
+        except (URLError, socket.timeout):
+            return None, "unreachable"
+        except Exception:  # pragma: no cover - defensive
+            return None, "error"
+        try:
+            raw = resp.read()
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+        text = raw.decode("utf-8", "replace").strip()
+        # "n/a" is how it says it does not know, with a 200 attached.
+        if not text or text.lower() == "n/a":
+            return None, "notfound"
+        return text, None
 
     def fetch_aircraft(self, mode_s):
         """Look up just the airframe for a Mode-S hex."""

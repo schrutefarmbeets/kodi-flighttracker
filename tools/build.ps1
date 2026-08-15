@@ -40,7 +40,8 @@ if ($python) {
 
 # ---------------------------------------------------------------- media present
 $required = @('icon.png', 'fanart.jpg', 'radar_bg.png', 'white.png', 'dot.png', 'home.png',
-              'airport.png', 'flap_panel.png', 'plate.png')
+              'airport.png', 'plate.png',
+              'corner_tl.png', 'corner_tr.png', 'corner_bl.png', 'corner_br.png')
 0..23 | ForEach-Object { $required += ('plane_{0:d3}.png' -f ($_ * 15)) }
 $mediaDir = Join-Path $src 'resources\media'
 $missing = $required | Where-Object { -not (Test-Path (Join-Path $mediaDir $_)) }

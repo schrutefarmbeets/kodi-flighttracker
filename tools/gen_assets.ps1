@@ -243,3 +243,28 @@ $plateOut.Dispose()
 $bmp.Dispose()
 
 Write-Output ("Wrote {0} files to {1}" -f (Get-ChildItem $outDir).Count, $outDir)
+
+# ---------------------------------------------------------------- card corners
+# Kodi has no rounded-rectangle primitive and stretching a rounded PNG turns the
+# corners into ellipses, so a card is assembled from four fixed-size corner tiles
+# and three plain fills. Drawn white; colorDiffuse tints them to the card colour.
+$CR = 48
+foreach ($corner in @(
+    @('corner_tl.png', 0,    0,    180),
+    @('corner_tr.png', -$CR, 0,    270),
+    @('corner_bl.png', 0,    -$CR, 90),
+    @('corner_br.png', -$CR, -$CR, 0))) {
+
+    $name = $corner[0]; $ox = $corner[1]; $oy = $corner[2]; $start = $corner[3]
+    $cbmp = New-Object System.Drawing.Bitmap(($CR * $SS), ($CR * $SS), [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $cg = [System.Drawing.Graphics]::FromImage($cbmp)
+    $cg.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $cg.Clear([System.Drawing.Color]::Transparent)
+    $cg.FillPie($whiteBrush, [float]($ox * $SS), [float]($oy * $SS),
+                [float]($CR * 2 * $SS), [float]($CR * 2 * $SS), [float]$start, 90.0)
+    $cg.Dispose()
+    Save-Downsampled $cbmp $CR (Join-Path $outDir $name)
+    $cbmp.Dispose()
+}
+
+Write-Output ("Corner tiles written to {0}" -f $outDir)
