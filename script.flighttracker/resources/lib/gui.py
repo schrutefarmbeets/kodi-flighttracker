@@ -422,6 +422,15 @@ class FlightWindow(xbmcgui.WindowXML):
         route = flight.route
         if not route:
             return "ROUTE UNKNOWN"
+
+        # A multi-sector flight number landing here: we know where it goes next
+        # but not where it has come from, so say only what is true.
+        if flight.route_conflict == "onward":
+            onward = self._place_name(route.dest_icao, route.dest_city,
+                                      route.dest_iata).upper()
+            text = "CONTINUES TO %s" % onward
+            return text if len(text) <= limit else onward
+
         origin = self._place_name(route.origin_icao, route.origin_city,
                                   route.origin_iata).upper()
         dest = self._place_name(route.dest_icao, route.dest_city,

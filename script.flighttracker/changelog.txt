@@ -1,3 +1,13 @@
+v1.0.1
+- What an aircraft is plainly doing now outranks the route database. Long
+  flights that keep one callsign across several sectors, such as KL843 from
+  Amsterdam through Bangkok to Taipei, were showing as departures while
+  visibly landing, because the database only holds the onward leg.
+- Where that happens the board says CONTINUES TO <destination> rather than
+  claiming the flight started at the airport it is landing at.
+- A climb near the runway no longer overrides a known arrival, so a go-around
+  stays an arrival instead of flipping to a departure.
+
 v1.0.0
 - Split-flap departure board showing what is happening right now: the aircraft
   on final approach and the one climbing out, rather than a list to scan.

@@ -18,6 +18,15 @@ VS_DEADBAND_FPM = 250
 # evidence of a departure or an arrival when no route data is available.
 TERMINAL_RANGE_NM = 45.0
 
+# Closer in and lower down, what the aircraft is physically doing outranks what
+# the route database says. Plenty of long flights keep one callsign across
+# several sectors: KL843 is Amsterdam-Bangkok-Taipei, and the database holds
+# only the Bangkok-Taipei leg, so an aircraft touching down in Bangkok on that
+# callsign looks like a departure on paper while visibly landing.
+CERTAIN_RANGE_NM = 12.0
+CERTAIN_ALT_FT = 7000
+CERTAIN_VS_FPM = 400
+
 KIND_COLOURS = {
     KIND_ARRIVAL: "FF6FD46F",
     KIND_DEPARTURE: "FFFFC24B",
@@ -96,6 +105,7 @@ class Flight(object):
         "lat", "lon", "alt_ft", "on_ground", "gs_kt", "track_deg", "vs_fpm", "seen",
         "distance_nm", "bearing_deg", "elevation_deg", "relative_bearing", "in_view",
         "route", "aircraft_info", "kind", "phase", "airport_icao", "airport_dist_nm", "eta_min",
+        "route_conflict",
     )
 
     def __init__(self):
@@ -189,7 +199,46 @@ class Flight(object):
         else:
             self.airport_icao, self.airport_dist_nm = None, None
 
+    def _physical_kind(self, my_airports):
+        """What the aircraft is plainly doing, when that is beyond argument.
+
+        Returns None unless the evidence is strong enough to outrank the route
+        database. Descent and climb are not treated symmetrically: an aircraft
+        a few hundred feet up near the runway and coming down is landing, full
+        stop, whereas one climbing at the same place might equally be going
+        around, so a climb only counts when the route does not already say this
+        is an arrival.
+        """
+        if self.airport_dist_nm is None or self.airport_dist_nm > CERTAIN_RANGE_NM:
+            return None
+        if self.alt_ft is None or self.alt_ft > CERTAIN_ALT_FT:
+            return None
+        if self.vs_fpm is None:
+            return None
+
+        if self.vs_fpm <= -CERTAIN_VS_FPM:
+            return KIND_ARRIVAL
+        if self.vs_fpm >= CERTAIN_VS_FPM:
+            inbound = self.route and (self.route.dest_icao or "").upper() in my_airports
+            return None if inbound else KIND_DEPARTURE
+        return None
+
     def classify(self, my_airports):
+        self.route_conflict = None
+
+        physical = self._physical_kind(my_airports)
+        if physical is not None:
+            self.kind = physical
+            route = self.route
+            # Landing, but the route we hold starts here: it describes the next
+            # sector of the same flight number, not the one being flown, so it
+            # must not be printed as this aircraft's journey.
+            if (route and physical == KIND_ARRIVAL
+                    and (route.origin_icao or "").upper() in my_airports):
+                self.route_conflict = "onward"
+            self._set_eta()
+            return
+
         route = self.route
         if route:
             dest = (route.dest_icao or "").upper()
@@ -213,6 +262,9 @@ class Flight(object):
         else:
             self.kind = KIND_UNKNOWN
 
+        self._set_eta()
+
+    def _set_eta(self):
         if (self.kind == KIND_ARRIVAL and self.airport_dist_nm is not None
                 and self.gs_kt and self.gs_kt > 60):
             self.eta_min = (self.airport_dist_nm / self.gs_kt) * 60.0

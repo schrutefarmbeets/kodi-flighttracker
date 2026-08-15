@@ -200,6 +200,64 @@ def test_one_airport():
     window._stop.set()
 
 
+def test_multisector_callsign():
+    """A landing aircraft must read as landing, whatever the route says.
+
+    Taken from a real sighting: KLM843 on short final into Suvarnabhumi at
+    675 ft descending 768 fpm, while adsbdb holds KL843 as Bangkok to Taipei
+    because the flight keeps one callsign from Amsterdam through to Taiwan.
+    The board called it a departure.
+    """
+    print("\n[multi-sector callsign]")
+    cfg = config.Config()
+    window = build_window(cfg)
+    book = window.tracker.store.airports
+
+    onward = make_route(
+        callsign="KLM843", airline="KLM Royal Dutch Airlines", airline_iata="KL",
+        origin_icao="VTBS", origin_iata="BKK", origin_city="Bangkok",
+        dest_icao="RCTP", dest_iata="TPE", dest_city="Taipei")
+
+    landing = place(cfg, 118, 2.5, 675, 200, "KLM843", "k1", vs=-768, route=onward)
+    prepared(cfg, [landing], book)
+
+    check("short final reads as an arrival", landing.kind == "arrival", landing.kind)
+    check("status says LANDING", board_status(landing) == "LANDING", board_status(landing))
+    check("the stale route is flagged", landing.route_conflict == "onward",
+          str(landing.route_conflict))
+
+    text = window._route_text(landing, 40)
+    check("the board does not claim it departed Bangkok",
+          not text.startswith("BANGKOK"), text)
+    check("it says where the flight goes next", "TAIPEI" in text, text)
+    print("       renders as: %s   [%s]" % (text, board_status(landing)))
+
+    # A genuine departure on the same numbers must still read as one.
+    climbing = place(cfg, 118, 5, 3000, 20, "KLM843", "k2", vs=2200, route=onward)
+    prepared(cfg, [climbing], book)
+    check("a real departure still reads as one", climbing.kind == "departure", climbing.kind)
+    check("and keeps its route", climbing.route_conflict is None)
+    print("       renders as: %s   [%s]"
+          % (window._route_text(climbing, 40), board_status(climbing)))
+
+    # A go-around climbing away must not be flipped to a departure when the
+    # route says it is inbound here.
+    inbound = make_route(
+        callsign="THA916", airline="Thai Airways International", airline_iata="TG",
+        origin_icao="EGLL", origin_iata="LHR", origin_city="London",
+        dest_icao="VTBS", dest_iata="BKK", dest_city="Bangkok")
+    goaround = place(cfg, 118, 4, 2500, 200, "THA916", "k3", vs=1800, route=inbound)
+    prepared(cfg, [goaround], book)
+    check("a go-around stays an arrival", goaround.kind == "arrival", goaround.kind)
+
+    # And cruising traffic high overhead is untouched by any of this.
+    cruising = place(cfg, 118, 8, 34000, 90, "SIA999", "k4", vs=0)
+    prepared(cfg, [cruising], book)
+    check("high overflight is not dragged into the terminal logic",
+          cruising.kind != "arrival", cruising.kind)
+    window._stop.set()
+
+
 def test_selection():
     print("\n[now selection]")
     cfg = config.Config(airport_primary="VTBS", airport_secondary="VTBD",
@@ -478,6 +536,7 @@ def main():
     print("Flight Tracker UI test%s" % (" (offline)" if offline else ""))
     test_settings_wiring()
     test_one_airport()
+    test_multisector_callsign()
     test_selection()
     test_board()
     test_flap()
