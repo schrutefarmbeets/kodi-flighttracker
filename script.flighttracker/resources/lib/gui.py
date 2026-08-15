@@ -444,7 +444,7 @@ class FlightWindow(xbmcgui.WindowXML):
         return codes if len(codes) <= limit else full[:limit]
 
     def _flight_text(self, flight, limit):
-        bits = [flight.display_callsign]
+        bits = [flight.display_number]
         info = flight.aircraft_info or {}
         kind = flight.type_desc or info.get("type") or flight.type_code
         if kind:

@@ -1,3 +1,16 @@
+v1.0.3
+- The queue is ranked by track miles instead of ground distance. Ground
+  distance alone treated an aircraft seven miles out at 11,000 ft as though it
+  were about to touch down, ahead of one on final at 2,000 ft. Height an
+  aircraft still has to lose now counts as distance it still has to fly.
+- The same measure decides what reaches the board at all, so something close to
+  the field but far too high to be landing is left off rather than announced as
+  landing next.
+- Departures are judged on a climb gradient rather than an approach one.
+- The board shows the IATA flight number where it is known, MH784 rather than
+  the radio callsign MAS784, matching what airport boards and tracking apps
+  display so a flight can actually be looked up.
+
 v1.0.2
 - The board is the runway queue. Instead of one arrival and one departure, it
   shows the two or three aircraft closest to the runway, whichever they are, so

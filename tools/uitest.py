@@ -286,7 +286,8 @@ def test_runway_queue():
                route=DEPARTURE_ROUTE, anchor=VTBS)
     a2 = place(cfg, 20, 6, 2400, 200, "SIA978", "q3", vs=-900,
                route=ARRIVAL_ROUTE, anchor=VTBS)
-    a3 = place(cfg, 20, 11, 5000, 200, "QTR834", "q4", vs=-1100,
+    # 11 nm out on a three degree profile is about 3,300 ft.
+    a3 = place(cfg, 20, 11, 3200, 200, "QTR834", "q4", vs=-1100,
                route=ARRIVAL_ROUTE, anchor=VTBS)
     far = place(cfg, 20, 40, 18000, 200, "UAE999", "q5", vs=-1200,
                 route=ARRIVAL_ROUTE, anchor=VTBS)
@@ -297,7 +298,7 @@ def test_runway_queue():
     rows = window.tracker.select_now(flights)
     order = [f.callsign for _, f in rows]
     check("capped at the configured row count", len(rows) == 3, str(len(rows)))
-    check("ranked by distance to the runway",
+    check("ranked by track miles from the runway",
           order == ["UAE384", "THA132", "SIA978"], str(order))
     check("a departure can outrank a more distant arrival",
           order.index("THA132") < order.index("SIA978"), str(order))
@@ -356,6 +357,47 @@ def test_runway_queue():
           "QTR970" not in full, str(full))
     quiet = [f.callsign for _, f in window.tracker.select_now([a1, overflight])]
     check("a quiet runway lets one through", "QTR970" in quiet, str(quiet))
+    cfg.show_overflights = False
+
+    # Height counts as distance still to fly. Taken from a real sighting:
+    # MAS784 was close enough to the field to reach the board but at 8,000 ft,
+    # which is nothing like landing next, and HVN601 sat 7 nm out at 11,250 ft.
+    high = place(cfg, 20, 7.4, 11250, 200, "HVN601", "q8", vs=-320,
+                 route=ARRIVAL_ROUTE, anchor=VTBS)
+    low_but_far = place(cfg, 20, 14.6, 2100, 200, "AFR198", "q9", vs=-64,
+                        route=ARRIVAL_ROUTE, anchor=VTBS)
+    prepared(cfg, [high, low_but_far], book)
+
+    check("height counts against an aircraft near the field",
+          high.runway_track_nm > 30, "%.1f" % high.runway_track_nm)
+    check("a low aircraft further out is closer to landing",
+          low_but_far.runway_track_nm < high.runway_track_nm,
+          "%.1f vs %.1f" % (low_but_far.runway_track_nm, high.runway_track_nm))
+
+    ranked = [f.callsign for _, f in window.tracker.select_now([high, low_but_far, a1])]
+    check("the high one is kept off the board", "HVN601" not in ranked, str(ranked))
+    check("the one actually on final is on it", "AFR198" in ranked, str(ranked))
+
+    # A climbing departure is not judged on the approach gradient.
+    climbing = place(cfg, 200, 8.6, 5150, 20, "THA301", "q10", vs=3360,
+                     route=DEPARTURE_ROUTE, anchor=VTBS)
+    prepared(cfg, [climbing], book)
+    check("a departure is measured against its own climb gradient",
+          climbing.runway_track_nm < 10, "%.1f" % climbing.runway_track_nm)
+
+    # And the board prints the flight number people can actually look up.
+    with_iata = make_route(
+        callsign="MAS784", callsign_iata="MH784", airline="Malaysia Airlines",
+        airline_iata="MH", origin_icao="WMKK", origin_iata="KUL",
+        origin_city="Kuala Lumpur", dest_icao="VTBS", dest_iata="BKK",
+        dest_city="Bangkok")
+    mas = place(cfg, 20, 4, 1500, 200, "MAS784", "q11", vs=-700,
+                route=with_iata, anchor=VTBS)
+    prepared(cfg, [mas], book)
+    check("the board shows the IATA flight number", mas.display_number == "MH784",
+          mas.display_number)
+    check("and falls back to the callsign without one",
+          a1.display_number == "UAE384", a1.display_number)
     window._stop.set()
 
 
@@ -389,15 +431,18 @@ def test_board():
               len(row["texts"]["flight"]) <= row["flight_chars"],
               "%d chars in %d" % (len(row["texts"]["flight"]), row["flight_chars"]))
 
-    print("       %s | %s | %s" % (window._rows[0]["texts"]["slot"],
-                                   window._rows[0]["texts"]["route"],
-                                   window._rows[0]["texts"]["status"]))
-    print("       %s | %s | %s" % (window._rows[1]["texts"]["slot"],
-                                   window._rows[1]["texts"]["route"],
-                                   window._rows[1]["texts"]["status"]))
+    for row in window._rows:
+        print("       %s | %s | %s" % (row["texts"]["slot"], row["texts"]["route"],
+                                       row["texts"]["status"]))
 
-    check("route names both ends", ">" in window._rows[0]["texts"]["route"])
-    check("arrival names its origin", "DUBAI" in window._rows[0]["texts"]["route"])
+    # Rows are ranked by track miles, so which one lands where is not fixed.
+    by_slot = {row["texts"]["slot"]: row for row in window._rows}
+    check("both an arrival and a departure are on the board",
+          set(by_slot) == {"ARRIVAL", "DEPARTURE"}, str(sorted(by_slot)))
+    arrival_row = by_slot.get("ARRIVAL")
+    check("route names both ends", ">" in arrival_row["texts"]["route"])
+    check("arrival names its origin", "DUBAI" in arrival_row["texts"]["route"],
+          arrival_row["texts"]["route"])
 
     # A long city pair must degrade to codes rather than spill over.
     long_flight = place(cfg, 200, 4, 3000, 200, "TLM786", "d1", vs=1500,
@@ -417,8 +462,8 @@ def test_board():
 
     # No logo store, so the badge should carry the airline code.
     check("badge falls back to the airline code",
-          window._rows[0]["texts"].get("badge") == "EK",
-          repr(window._rows[0]["texts"].get("badge")))
+          arrival_row["texts"].get("badge") == "EK",
+          repr(arrival_row["texts"].get("badge")))
 
     # Rows must be rebuilt when the shape changes, not stacked up.
     before = len(window._rows)

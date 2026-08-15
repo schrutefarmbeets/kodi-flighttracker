@@ -116,10 +116,11 @@ class Tracker(object):
     def select_now(self, flights):
         """The runway queue: what is landing or taking off at this moment.
 
-        One list ranked purely by how close each aircraft is to the runway, so
-        an airliner that has just rotated can sit above one still on approach.
-        Anything beyond the approach range is left off entirely rather than
-        shown with some softer wording, which keeps every row on the board
+        One list ranked by track miles from the runway, so an airliner that has
+        just rotated can sit above one still on approach, while one that is
+        close to the field but far too high to be landing does not displace
+        either. Anything beyond the approach range is left off entirely rather
+        than shown with some softer wording, which keeps every row on the board
         genuinely a landing or a take-off.
         """
         cfg = self.cfg
@@ -136,10 +137,10 @@ class Tracker(object):
                 slot = SLOT_DEPARTURE
             else:
                 continue
-            distance = flight.airport_dist_nm
-            if distance is None or distance > reach:
+            track = flight.runway_track_nm
+            if track is None or track > reach:
                 continue
-            queue.append((distance, slot, flight))
+            queue.append((track, slot, flight))
 
         queue.sort(key=lambda item: item[0])
         rows = [(slot, flight) for _, slot, flight in queue[:limit]]

@@ -27,6 +27,14 @@ CERTAIN_RANGE_NM = 12.0
 CERTAIN_ALT_FT = 7000
 CERTAIN_VS_FPM = 400
 
+# Height an aircraft trades for a mile of ground. A three degree approach is
+# about 300 ft per nautical mile; a jet climbing out covers ground faster than
+# that, nearer 800. Used to turn "how far away" into "how far still to fly",
+# because an aircraft seven miles out at 11,000 ft is nowhere near landing
+# while one fourteen miles out at 2,000 ft is on final.
+GLIDESLOPE_FT_PER_NM = 300.0
+CLIMBOUT_FT_PER_NM = 800.0
+
 KIND_COLOURS = {
     KIND_ARRIVAL: "FF6FD46F",
     KIND_DEPARTURE: "FFFFC24B",
@@ -286,6 +294,36 @@ class Flight(object):
     @property
     def colour(self):
         return KIND_COLOURS.get(self.kind, KIND_COLOURS[KIND_UNKNOWN])
+
+    @property
+    def runway_track_nm(self):
+        """Track miles between this aircraft and the runway.
+
+        Ground distance alone ranks an aircraft high above the field as though
+        it were about to touch down. Whichever is greater, the ground distance
+        or the miles implied by the height it has to lose or has gained, is a
+        far better answer to "which one lands next".
+        """
+        if self.airport_dist_nm is None:
+            return None
+        altitude = self.alt_ft or 0.0
+        if self.kind == KIND_ARRIVAL:
+            return max(self.airport_dist_nm, altitude / GLIDESLOPE_FT_PER_NM)
+        if self.kind == KIND_DEPARTURE:
+            return max(self.airport_dist_nm, altitude / CLIMBOUT_FT_PER_NM)
+        return self.airport_dist_nm
+
+    @property
+    def display_number(self):
+        """What an airport board would print: the IATA flight number.
+
+        Boards and the tracking apps show MH784, not the ICAO radio callsign
+        MAS784 that comes over the air, so looking one up against the other
+        turns up nothing.
+        """
+        if self.route and self.route.callsign_iata:
+            return self.route.callsign_iata
+        return self.display_callsign
 
     @property
     def is_airliner(self):
